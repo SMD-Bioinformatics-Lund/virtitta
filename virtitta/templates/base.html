@@ -17,6 +17,9 @@
     </nav>
   </header>
   <main class="layout">
+    {% if warning_message %}
+    <section class="panel warning-banner">{{ warning_message }}</section>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>

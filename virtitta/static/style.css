@@ -65,6 +65,12 @@ a:hover {
   min-width: 0;
 }
 
+.warning-banner {
+  background: var(--warn);
+  border-color: #d3b861;
+  font-weight: 600;
+}
+
 .filters,
 .bulkbar,
 .button-row,

@@ -73,6 +73,7 @@
       <button type="submit" name="qc_status" value="pass">Mark pass</button>
       <button type="submit" name="qc_status" value="fail">Mark fail</button>
       <button type="submit" name="qc_status" value="unreviewed" class="secondary">Reset QC</button>
+      <button type="submit" formaction="{{ request.url_for('bulk_lims_export') }}" formmethod="post" class="secondary">Export LIMS</button>
       <span class="count">{{ rows|length }} samples</span>
     </div>
 
@@ -146,6 +147,7 @@
             <td class="col-actions">
               <div class="action-links">
                 <a class="mini-action" href="{{ request.url_for('sample_igv', sample_run_id=row['sample_run_id']) }}">IGV</a>
+                <a class="mini-action secondary" href="{{ request.url_for('sample_lims_export', sample_run_id=row['sample_run_id']) }}">LIMS</a>
                 <a class="mini-action secondary" href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}">Open</a>
               </div>
             </td>

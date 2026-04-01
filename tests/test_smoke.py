@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import unittest
@@ -8,10 +9,10 @@ from tempfile import TemporaryDirectory
 
 from starlette.requests import Request
 
-from virtitta.app import build_igv_url, create_app
+from virtitta.app import build_igv_url, build_lims_export_content, create_app
 from virtitta.config import load_config
 from virtitta.importer import import_run
-from virtitta.repository import add_comment, connect, get_sample, list_samples
+from virtitta.repository import add_comment, connect, get_sample, list_samples, update_qc_status
 
 
 FIXTURE_PATH = Path("/home/jonas/git/virpipa/assets/test_data/qc_summary/qc_summary.json")
@@ -78,6 +79,12 @@ class VirtittaSmokeTests(unittest.TestCase):
             "SAMPLE001.vadr.pass_mod.gff",
         ]:
             (self.sample_dir / filename).write_text("placeholder", encoding="utf-8")
+        (self.sample_dir / "lid").mkdir(parents=True)
+        (self.sample_dir / "lid" / "LID001-2limsrs.txt").write_text(
+            "sample_id\tparameter_name\tparameter_value\tcomment\n"
+            "LID001\thcvtyp\tHCV genotyp 3a\t\n",
+            encoding="utf-8",
+        )
 
         self.config_path = self.tmp_path / "virtitta.toml"
         self.db_path = self.tmp_path / "virtitta.sqlite3"
@@ -193,6 +200,58 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["comment_count"], 2)
         self.assertIn("bob: Second comment body", rows[0]["comment_preview"])
+
+    def test_lims_export_reuses_existing_rows_and_appends_qc(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        export_text = build_lims_export_content(config, [sample])
+        self.assertEqual(
+            export_text,
+            (
+                "sample_id\tparameter_name\tparameter_value\tcomment\n"
+                "LID001\thcvtyp\tHCV genotyp 3a\t\n"
+                "LID001\thcvqc\tpassed\t\n"
+            ),
+        )
+
+    def test_single_sample_lims_export_blocks_unreviewed(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(
+            route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/lims-export"
+        )
+
+        response = route.endpoint("SAMPLE001_fixture_run")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("/samples/SAMPLE001_fixture_run", response.headers["location"])
+        self.assertIn("warning=", response.headers["location"])
+
+    def test_bulk_lims_export_blocks_unreviewed(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/lims-export")
+
+        response = asyncio.run(
+            route.endpoint(
+                sample_run_id=["SAMPLE001_fixture_run"],
+                redirect_to="/?run_name=fixture_run",
+            )
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("/?run_name=fixture_run", response.headers["location"])
+        self.assertIn("warning=", response.headers["location"])
 
 
 if __name__ == "__main__":

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path, PureWindowsPath
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -57,6 +57,8 @@ IGV_TRACK_LINKS = [
     ("Resistance GFF", "resistance_gff"),
     ("Selected VADR GFF", "selected_vadr_gff"),
 ]
+
+LIMS_EXPORT_HEADER = "sample_id\tparameter_name\tparameter_value\tcomment"
 
 
 def format_value(value: object) -> str:
@@ -155,6 +157,70 @@ def windows_path_to_igv_path(path_str: str) -> str:
     return path_str
 
 
+def lims_qc_value(qc_status: str | None) -> str:
+    return "passed" if qc_status == "pass" else "failed"
+
+
+def normalize_lims_row(line: str) -> str:
+    parts = line.rstrip("\n\r").split("\t")
+    if len(parts) < 4:
+        parts.extend([""] * (4 - len(parts)))
+    return "\t".join(parts[:4])
+
+
+def build_lims_export_rows(config: Config, sample_row: dict) -> list[str]:
+    raw = raw_json_for_sample(sample_row)
+    rows: list[str] = []
+
+    try:
+        lims_file, _ = resolve_output_file(config, sample_row, "lid_2limsrs")
+    except HTTPException:
+        lims_file = None
+
+    if lims_file is not None:
+        for line in lims_file.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped == LIMS_EXPORT_HEADER:
+                continue
+            rows.append(normalize_lims_row(line))
+    else:
+        lid = raw.get("lid") or sample_row.get("lid") or sample_row.get("sample_id") or ""
+        subtype = (
+            raw.get("typing", {}).get("report_subtype")
+            or sample_row.get("typing_report_subtype")
+            or ""
+        )
+        if lid and subtype:
+            rows.append(normalize_lims_row(f"{lid}\thcvtyp\tHCV genotyp {subtype}\t"))
+
+    lid = raw.get("lid") or sample_row.get("lid") or sample_row.get("sample_id") or ""
+    rows.append(normalize_lims_row(f"{lid}\thcvqc\t{lims_qc_value(sample_row.get('qc_status'))}\t"))
+    return rows
+
+
+def build_lims_export_content(config: Config, sample_rows: list[dict]) -> str:
+    lines = [LIMS_EXPORT_HEADER]
+    for sample_row in sample_rows:
+        lines.extend(build_lims_export_rows(config, sample_row))
+    return "\n".join(lines) + "\n"
+
+
+def lims_export_filename(sample_rows: list[dict]) -> str:
+    if len(sample_rows) == 1:
+        identifier = display_identifier(sample_rows[0]) or sample_rows[0].get("sample_id") or "sample"
+        safe_identifier = str(identifier).replace("/", "_").replace(" ", "_")
+        return f"{safe_identifier}-2limsrs.txt"
+    return "virtitta-2limsrs.txt"
+
+
+def append_warning(url: str, message: str) -> str:
+    parts = urlsplit(url)
+    query_items = parse_qsl(parts.query, keep_blank_values=True)
+    query_items = [(key, value) for key, value in query_items if key != "warning"]
+    query_items.append(("warning", message))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
+
+
 def build_igv_url(config: Config, sample_row) -> str:
     if not config.features.igv or not config.igv.enabled:
         raise HTTPException(status_code=404, detail="IGV integration is disabled")
@@ -220,6 +286,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         run_name: str = Query(default=""),
         subtype: str = Query(default=""),
         qc_status: str = Query(default=""),
+        warning: str = Query(default=""),
         min_coverage_pct: str = Query(default=""),
         min_mean_depth: str = Query(default=""),
         min_blast_identity: str = Query(default=""),
@@ -278,6 +345,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "min_mean_depth": min_mean_depth,
                 "min_blast_identity": min_blast_identity,
                 "max_ct": max_ct,
+                "warning_message": warning,
                 "qc_status_options": QC_STATUS_OPTIONS,
                 "summary": {
                     "total": len(rows),
@@ -306,8 +374,42 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             connection.close()
         return RedirectResponse(redirect_to, status_code=303)
 
+    @app.post("/samples/lims-export")
+    async def bulk_lims_export(
+        sample_run_id: list[str] = Form(default=[]),
+        redirect_to: str = Form(default="/"),
+    ):
+        if not sample_run_id:
+            return RedirectResponse(redirect_to, status_code=303)
+
+        connection = connect(config.database.path)
+        try:
+            sample_rows = []
+            for item in sample_run_id:
+                sample_row = get_sample(connection, item)
+                if sample_row is not None:
+                    sample_rows.append(sample_row)
+        finally:
+            connection.close()
+
+        if not sample_rows:
+            raise HTTPException(status_code=404, detail="No matching samples found")
+        if any(row.get("qc_status") == "unreviewed" for row in sample_rows):
+            return RedirectResponse(
+                append_warning(redirect_to, "LIMS export is blocked for unreviewed samples."),
+                status_code=303,
+            )
+
+        content = build_lims_export_content(config, sample_rows)
+        filename = lims_export_filename(sample_rows)
+        return Response(
+            content=content,
+            media_type="text/tab-separated-values; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     @app.get("/samples/{sample_run_id}", response_class=HTMLResponse)
-    def sample_detail(request: Request, sample_run_id: str):
+    def sample_detail(request: Request, sample_run_id: str, warning: str = Query(default="")):
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
@@ -338,6 +440,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "format_value": format_value,
                 "display_identifier": display_identifier,
                 "igv_url": igv_url,
+                "warning_message": warning,
                 "qc_status_options": QC_STATUS_OPTIONS,
                 "detail_links": output_links(raw, DETAIL_FILE_LINKS),
                 "igv_track_links": output_links(raw, IGV_TRACK_LINKS),
@@ -371,6 +474,33 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
         file_path, relname = resolve_output_file(config, sample_row, output_key)
         return FileResponse(file_path, filename=relname)
+
+    @app.get("/samples/{sample_run_id}/lims-export")
+    def sample_lims_export(sample_run_id: str):
+        connection = connect(config.database.path)
+        try:
+            sample_row = get_sample(connection, sample_run_id)
+            if sample_row is None:
+                raise HTTPException(status_code=404, detail="Sample not found")
+        finally:
+            connection.close()
+
+        if sample_row.get("qc_status") == "unreviewed":
+            return RedirectResponse(
+                append_warning(
+                    f"/samples/{sample_run_id}",
+                    "LIMS export is blocked until QC is marked pass or fail.",
+                ),
+                status_code=303,
+            )
+
+        content = build_lims_export_content(config, [sample_row])
+        filename = lims_export_filename([sample_row])
+        return Response(
+            content=content,
+            media_type="text/tab-separated-values; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     @app.get("/samples/{sample_run_id}/igv")
     def sample_igv(sample_run_id: str):
