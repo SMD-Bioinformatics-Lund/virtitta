@@ -156,8 +156,8 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertIsNotNone(sample)
         igv_url = build_igv_url(config, sample)
-        self.assertIn("genome=/Q:virtitta-test/fixture_run/SAMPLE001/results/SAMPLE001.fasta", igv_url)
-        self.assertIn("file=/Q:virtitta-test/fixture_run/SAMPLE001/results/SAMPLE001.cram,", igv_url)
+        self.assertIn("genome=%2FQ%3Avirtitta-test%2Ffixture_run%2FSAMPLE001%2Fresults%2FSAMPLE001.fasta", igv_url)
+        self.assertIn("file=%2FQ%3Avirtitta-test%2Ffixture_run%2FSAMPLE001%2Fresults%2FSAMPLE001.cram%2C", igv_url)
         self.assertIn("SAMPLE001_resistance.gff", igv_url)
         self.assertIn("merge=false", igv_url)
 

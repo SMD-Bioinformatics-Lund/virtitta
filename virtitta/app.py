@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path, PureWindowsPath
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -196,11 +196,11 @@ def build_igv_url(config: Config, sample_row) -> str:
         converted = convert_output(key)
         if converted:
             files.append(converted)
-    query_parts = [f"genome={quote(genome, safe='/:')}"]
+    query_items: list[tuple[str, str]] = [("genome", genome)]
     if files:
-        query_parts.append(f"file={quote(','.join(files), safe='/:,')}")
-    query_parts.append("merge=false")
-    return f"{config.igv.base_url}?{'&'.join(query_parts)}"
+        query_items.append(("file", ",".join(files)))
+    query_items.append(("merge", "false"))
+    return f"{config.igv.base_url}?{urlencode(query_items)}"
 
 
 def create_app(config_path: str | Path | None = None) -> FastAPI:
