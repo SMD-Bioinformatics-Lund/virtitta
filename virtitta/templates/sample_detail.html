@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel split-header">
+  <div>
+    <h2>{{ display_identifier(sample) }}</h2>
+    <div class="meta-line">{{ sample["sample_id"] }} · {{ sample["run_name"] }} · {{ sample["qc_status"] }}</div>
+  </div>
+  <div class="button-row">
+    {% if igv_url %}
+    <a class="button-link" href="{{ igv_url }}">Launch IGV</a>
+    {% endif %}
+    <a class="button-link secondary" href="{{ request.url_for('index') }}">Back</a>
+  </div>
+</section>
+
+<section class="grid two-col">
+  <div class="panel">
+    <h3>Review</h3>
+    <form method="post" action="{{ request.url_for('bulk_qc_update') }}" class="stack">
+      <input type="hidden" name="sample_run_id" value="{{ sample['sample_run_id'] }}">
+      <input type="hidden" name="redirect_to" value="{{ request.url }}">
+      <label>QC status</label>
+      <select name="qc_status">
+        {% for status in qc_status_options %}
+        <option value="{{ status }}" {% if status == sample['qc_status'] %}selected{% endif %}>{{ status }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Save QC</button>
+    </form>
+    <div class="meta-line">Last updated: {{ sample["qc_updated_at"] or "never" }}</div>
+  </div>
+
+  <div class="panel">
+    <h3>Rug Plot</h3>
+    {% if sample_json.outputs.display_rug_kde_plot %}
+    <img class="detail-image" src="{{ request.url_for('sample_file', sample_run_id=sample['sample_run_id'], output_key='display_rug_kde_plot') }}" alt="Rug KDE plot">
+    {% else %}
+    <div class="muted">No rug plot available.</div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="grid two-col">
+  <div class="panel">
+    <h3>Imported Summary</h3>
+    <table class="detail-table">
+      <tbody>
+        <tr><th>LID</th><td>{{ format_value(sample["lid"]) }}</td></tr>
+        <tr><th>Sample ID</th><td>{{ sample["sample_id"] }}</td></tr>
+        <tr><th>Sample Run ID</th><td>{{ sample["sample_run_id"] }}</td></tr>
+        <tr><th>Subtype</th><td>{{ format_value(sample["typing_report_subtype"]) }}</td></tr>
+        <tr><th>BLAST %</th><td>{{ format_value(sample["typing_main_blast_identity"]) }}</td></tr>
+        <tr><th>Reads In</th><td>{{ format_value(sample["host_filter_reads_in"]) }}</td></tr>
+        <tr><th>Hostile Removed</th><td>{{ format_value(sample["host_filter_reads_removed_proportion"]) }}</td></tr>
+        <tr><th>Coverage %</th><td>{{ format_value(sample["qc_coverage_pct"]) }}</td></tr>
+        <tr><th>Mean Depth</th><td>{{ format_value(sample["qc_mean_depth"]) }}</td></tr>
+        <tr><th>1x %</th><td>{{ format_value(sample["qc_coverage_1x_pct"]) }}</td></tr>
+        <tr><th>10x %</th><td>{{ format_value(sample["qc_coverage_10x_pct"]) }}</td></tr>
+        <tr><th>100x %</th><td>{{ format_value(sample["qc_coverage_100x_pct"]) }}</td></tr>
+        <tr><th>1000x %</th><td>{{ format_value(sample["qc_coverage_1000x_pct"]) }}</td></tr>
+        <tr><th>CT</th><td>{{ format_value(sample["sample_metadata_ct"]) }}</td></tr>
+        <tr><th>Lib Conc</th><td>{{ format_value(sample["sample_metadata_library_concentration_ng_ul"]) }}</td></tr>
+        <tr><th>Fragment BP</th><td>{{ format_value(sample["sample_metadata_library_fragment_length_bp"]) }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel" id="comments">
+    <h3>Comments</h3>
+    <form method="post" action="{{ request.url_for('create_comment', sample_run_id=sample['sample_run_id']) }}" class="stack">
+      <input type="text" name="author" placeholder="Author (optional)">
+      <textarea name="body" rows="4" placeholder="Add a comment"></textarea>
+      <button type="submit">Add comment</button>
+    </form>
+    <div class="comment-list">
+      {% for comment in comments %}
+      <article class="comment">
+        <div class="comment-meta">{{ comment["created_at"] }}{% if comment["author"] %} · {{ comment["author"] }}{% endif %}</div>
+        <div>{{ comment["body"] }}</div>
+      </article>
+      {% else %}
+      <div class="muted">No comments yet.</div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="grid two-col">
+  <div class="panel">
+    <h3>Result Files</h3>
+    <div class="link-grid">
+      {% for link in detail_links %}
+      <a class="file-link" href="{{ request.url_for('sample_file', sample_run_id=sample['sample_run_id'], output_key=link['key']) }}">
+        <span>{{ link["label"] }}</span>
+        <span class="muted file-name">{{ link["filename"] }}</span>
+      </a>
+      {% else %}
+      <div class="muted">No result files exposed for this sample.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>IGV Track Files</h3>
+    <div class="link-grid">
+      {% for link in igv_track_links %}
+      <a class="file-link" href="{{ request.url_for('sample_file', sample_run_id=sample['sample_run_id'], output_key=link['key']) }}">
+        <span>{{ link["label"] }}</span>
+        <span class="muted file-name">{{ link["filename"] }}</span>
+      </a>
+      {% else %}
+      <div class="muted">No IGV tracks available.</div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h3>Raw Imported JSON</h3>
+  <pre class="json-block">{{ sample_json_pretty }}</pre>
+</section>
+{% endblock %}

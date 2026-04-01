@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "virtitta"
+version = "0.1.0"
+description = "Dense review interface for virpipa sequencing results"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "jinja2>=3.1,<4",
+  "uvicorn>=0.30,<1",
+]
+
+[project.scripts]
+virtitta = "virtitta.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+virtitta = ["templates/*.html", "static/*"]
+

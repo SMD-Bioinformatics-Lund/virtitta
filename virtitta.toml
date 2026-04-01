@@ -1,0 +1,64 @@
+[app]
+title = "Virtitta"
+host = "127.0.0.1"
+port = 8000
+
+[database]
+path = "data/virtitta.sqlite3"
+
+[igv]
+enabled = true
+base_url = "http://localhost:60151/load"
+
+[features]
+comments = true
+bulk_qc = true
+igv = true
+
+[ui]
+visible_columns = [
+  "lid",
+  "sample_id",
+  "qc_status",
+  "typing_report_subtype",
+  "typing_main_blast_identity",
+  "host_filter_reads_in",
+  "host_filter_reads_removed_proportion",
+  "qc_coverage_pct",
+  "qc_mean_depth",
+  "qc_coverage_1x_pct",
+  "qc_coverage_10x_pct",
+  "qc_coverage_100x_pct",
+  "qc_coverage_1000x_pct",
+  "sample_metadata_ct",
+  "sample_metadata_library_concentration_ng_ul",
+  "sample_metadata_library_fragment_length_bp",
+  "run_name",
+]
+default_sort = "run_name"
+default_sort_desc = true
+
+[ui.highlight_rules.host_filter_reads_removed_proportion]
+warn_over = 0.01
+danger_over = 0.05
+
+[ui.highlight_rules.qc_coverage_pct]
+warn_under = 95
+danger_under = 90
+
+[ui.highlight_rules.qc_mean_depth]
+warn_under = 100
+danger_under = 30
+
+[ui.highlight_rules.typing_main_blast_identity]
+warn_under = 90
+danger_under = 85
+
+[ui.highlight_rules.sample_metadata_ct]
+warn_over = 32
+danger_over = 36
+
+[[results_roots]]
+name = "hcv_test_results"
+linux_path = "/mnt/fs1/jonas/hcv/test_results"
+windows_path = "Q:/jonas/hcv/test_results"
