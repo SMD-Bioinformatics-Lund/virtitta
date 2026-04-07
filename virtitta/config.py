@@ -33,7 +33,7 @@ DEFAULT_COLUMN_LABELS = {
     "typing_report_subtype": "Subtype",
     "typing_main_blast_identity": "BLAST %",
     "host_filter_reads_in": "Reads In",
-    "host_filter_reads_removed_proportion": "Hostile Removed",
+    "host_filter_reads_removed_proportion": "Human",
     "qc_coverage_pct": "Coverage %",
     "qc_mean_depth": "Mean Depth",
     "qc_coverage_1x_pct": "1x %",

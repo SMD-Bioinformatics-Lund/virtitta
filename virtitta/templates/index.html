@@ -130,11 +130,11 @@
             {% elif loop.index == 3 %}
               {% set sticky_class = 'sticky-col sticky-qc-status' %}
             {% endif %}
-            <td class="col-{{ column }} {{ sticky_class }} {{ cell_class(column, value) }}">
+            <td class="col-{{ column }} {{ sticky_class }} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}"{% if column == 'host_filter_reads_removed_proportion' %} style="{{ cell_style(column, value) }}"{% endif %}>
               {% if column == 'lid' %}
               <a href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}">{{ display_identifier(row) }}</a>
               {% else %}
-              {{ format_value(value) }}
+              {{ format_value(value, column) }}
               {% endif %}
             </td>
             {% endfor %}

@@ -9,7 +9,13 @@ from tempfile import TemporaryDirectory
 
 from starlette.requests import Request
 
-from virtitta.app import build_igv_url, build_lims_export_content, create_app
+from virtitta.app import (
+    build_igv_url,
+    build_lims_export_content,
+    cell_style,
+    create_app,
+    format_value,
+)
 from virtitta.config import load_config
 from virtitta.importer import import_run
 from virtitta.repository import add_comment, connect, get_sample, list_samples, update_qc_status
@@ -200,6 +206,16 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["comment_count"], 2)
         self.assertIn("bob: Second comment body", rows[0]["comment_preview"])
+
+    def test_format_value_applies_column_specific_rounding(self) -> None:
+        self.assertEqual(format_value(0.0123, "host_filter_reads_removed_proportion"), "1.2%")
+        self.assertEqual(format_value(91.514, "typing_main_blast_identity"), "91.5")
+        self.assertEqual(format_value(92.4598, "qc_coverage_pct"), "92.46")
+        self.assertEqual(format_value(4.42121, "qc_mean_depth"), "4")
+
+    def test_human_column_style_uses_data_bar_width(self) -> None:
+        self.assertEqual(cell_style("host_filter_reads_removed_proportion", 0.0123), "--data-bar-width:1.230%;")
+        self.assertEqual(cell_style("qc_mean_depth", 4.0), "")
 
     def test_lims_export_reuses_existing_rows_and_appends_qc(self) -> None:
         config = load_config(self.config_path)

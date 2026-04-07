@@ -275,14 +275,6 @@ button.secondary,
   max-width: 96px;
 }
 
-.dense-table tr.row-pass td {
-  background-image: linear-gradient(0deg, rgba(172, 223, 167, 0.25), rgba(172, 223, 167, 0.25));
-}
-
-.dense-table tr.row-fail td {
-  background-image: linear-gradient(0deg, rgba(236, 157, 157, 0.22), rgba(236, 157, 157, 0.22));
-}
-
 .detail-table th {
   background: #f1ebe0;
   text-align: left;
@@ -396,6 +388,26 @@ button.secondary,
 
 .cell-danger {
   background: var(--danger);
+}
+
+.cell-qc-pass {
+  background: #dcefd7;
+}
+
+.cell-qc-fail {
+  background: #f4d2d2;
+}
+
+.cell-data-bar {
+  position: relative;
+  background-image: linear-gradient(
+    90deg,
+    rgba(12, 92, 82, 0.20) 0,
+    rgba(12, 92, 82, 0.20) var(--data-bar-width, 0%),
+    transparent var(--data-bar-width, 0%),
+    transparent 100%
+  );
+  background-repeat: no-repeat;
 }
 
 .empty-state {

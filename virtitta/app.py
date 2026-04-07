@@ -61,9 +61,17 @@ IGV_TRACK_LINKS = [
 LIMS_EXPORT_HEADER = "sample_id\tparameter_name\tparameter_value\tcomment"
 
 
-def format_value(value: object) -> str:
+def format_value(value: object, column: str | None = None) -> str:
     if value is None:
         return ""
+    if column == "host_filter_reads_removed_proportion":
+        return f"{float(value) * 100:.1f}%"
+    if column == "typing_main_blast_identity":
+        return f"{float(value):.1f}"
+    if column == "qc_coverage_pct":
+        return f"{float(value):.2f}"
+    if column == "qc_mean_depth":
+        return f"{float(value):.0f}"
     if isinstance(value, float):
         return f"{value:.4f}".rstrip("0").rstrip(".")
     return str(value)
@@ -109,12 +117,27 @@ def cell_class(config: Config, column: str, value: object) -> str:
 
 
 def row_class(row: dict) -> str:
-    qc_status = row.get("qc_status", "unreviewed")
-    if qc_status == "pass":
-        return "row-pass"
-    if qc_status == "fail":
-        return "row-fail"
     return ""
+
+
+def cell_display_class(column: str, row: dict) -> str:
+    if column == "qc_status":
+        qc_status = row.get("qc_status", "unreviewed")
+        if qc_status == "pass":
+            return "cell-qc-pass"
+        if qc_status == "fail":
+            return "cell-qc-fail"
+    return ""
+
+
+def cell_style(column: str, value: object) -> str:
+    if column != "host_filter_reads_removed_proportion" or value in ("", None):
+        return ""
+    try:
+        percent = max(0.0, min(100.0, float(value) * 100.0))
+    except (TypeError, ValueError):
+        return ""
+    return f"--data-bar-width:{percent:.3f}%;"
 
 
 def output_links(raw_sample: dict, link_specs: list[tuple[str, str]]) -> list[dict]:
@@ -331,6 +354,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "visible_columns": config.ui.visible_columns,
                 "column_labels": {**DEFAULT_COLUMN_LABELS, **config.ui.column_labels},
                 "cell_class": lambda column, value: cell_class(config, column, value),
+                "cell_display_class": cell_display_class,
+                "cell_style": cell_style,
                 "row_class": row_class,
                 "format_value": format_value,
                 "display_identifier": display_identifier,
