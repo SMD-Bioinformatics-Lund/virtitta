@@ -142,6 +142,22 @@ def cell_style(column: str, value: object) -> str:
     return f"--data-bar-width:{percent:.3f}%;"
 
 
+def comment_link_label(row: dict) -> str:
+    count = int(row.get("comment_count") or 0)
+    if count <= 0:
+        return "None"
+
+    preview = str(row.get("comment_preview") or "").split("\n---\n", 1)[0].strip()
+    if ": " in preview:
+        preview = preview.split(": ", 1)[1].strip()
+    if not preview:
+        return str(count)
+
+    if len(preview) > 11:
+        preview = f"{preview[:11]}..."
+    return f"{count} - {preview}"
+
+
 def output_links(raw_sample: dict, link_specs: list[tuple[str, str]]) -> list[dict]:
     outputs = raw_sample.get("outputs", {})
     return [
@@ -364,6 +380,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "cell_class": lambda column, value: cell_class(config, column, value),
                 "cell_display_class": cell_display_class,
                 "cell_style": cell_style,
+                "comment_link_label": comment_link_label,
                 "row_class": row_class,
                 "format_value": format_value,
                 "display_identifier": display_identifier,

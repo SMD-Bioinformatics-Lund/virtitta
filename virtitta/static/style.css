@@ -38,6 +38,20 @@ a:hover {
   background: #efe7d7;
 }
 
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-logo {
+  display: block;
+  width: auto;
+  height: 30px;
+  flex: 0 0 auto;
+}
+
 .titleblock h1 {
   margin: 0;
   font-size: 1.3rem;

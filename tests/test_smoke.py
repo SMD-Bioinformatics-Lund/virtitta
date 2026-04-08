@@ -13,6 +13,7 @@ from virtitta.app import (
     build_igv_url,
     build_lims_export_content,
     cell_style,
+    comment_link_label,
     create_app,
     format_value,
 )
@@ -206,6 +207,13 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["comment_count"], 2)
         self.assertIn("bob: Second comment body", rows[0]["comment_preview"])
+
+    def test_comment_link_label_uses_latest_comment_snippet(self) -> None:
+        self.assertEqual(comment_link_label({"comment_count": 0, "comment_preview": ""}), "None")
+        self.assertEqual(
+            comment_link_label({"comment_count": 2, "comment_preview": "bob: failing sample badly\n---\nalice: older note"}),
+            "2 - failing sam..."
+        )
 
     def test_format_value_applies_column_specific_rounding(self) -> None:
         self.assertEqual(format_value(0.0123, "host_filter_reads_removed_proportion"), "1.2%")

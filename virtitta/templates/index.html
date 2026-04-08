@@ -153,7 +153,7 @@
               <a
                 href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}#comments"
                 title="{{ row['comment_preview'] or 'No comments' }}"
-              >{{ row['comment_count'] }}</a>
+              >{{ comment_link_label(row) }}</a>
             </td>
             <td class="col-actions">
               <div class="action-links">
