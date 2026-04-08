@@ -39,15 +39,15 @@ default_sort = "run_name"
 default_sort_desc = true
 
 [ui.highlight_rules.host_filter_reads_removed_proportion]
-warn_over = 0.01
-danger_over = 0.05
+warn_over = 0.1
+danger_over = 0.5
 
 [ui.highlight_rules.qc_coverage_pct]
 warn_under = 95
 danger_under = 90
 
 [ui.highlight_rules.qc_mean_depth]
-warn_under = 100
+warn_under = 70
 danger_under = 30
 
 [ui.highlight_rules.typing_main_blast_identity]
