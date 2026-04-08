@@ -92,14 +92,22 @@ a:hover {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.summary-controls {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+  justify-content: space-between;
+  flex-wrap: wrap;
   margin-bottom: 8px;
 }
 
 .column-toggle-panel {
-  margin-bottom: 8px;
   border: 1px solid var(--line);
   background: #faf5ea;
   padding: 6px 8px;
+  margin: 0;
 }
 
 .column-toggle-panel summary {
@@ -189,6 +197,11 @@ button.secondary,
   margin-left: auto;
   font-size: 0.9rem;
   color: #5f574a;
+}
+
+.bulk-comment {
+  min-width: 260px;
+  flex: 1 1 280px;
 }
 
 .table-wrap {

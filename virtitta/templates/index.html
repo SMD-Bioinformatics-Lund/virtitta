@@ -40,31 +40,33 @@
 </section>
 
 <section class="panel">
-  <div class="summary-bar">
-    <span class="summary-pill">Total {{ summary.total }}</span>
-    <span class="summary-pill summary-unreviewed">Unreviewed {{ summary.unreviewed }}</span>
-    <span class="summary-pill summary-pass">Pass {{ summary.pass }}</span>
-    <span class="summary-pill summary-fail">Fail {{ summary.fail }}</span>
-  </div>
-  <details class="column-toggle-panel">
-    <summary>Columns</summary>
-    <div class="column-toggle-grid">
-      {% for column in visible_columns %}
-      <label class="column-toggle">
-        <input type="checkbox" class="js-col-toggle" data-col="{{ column }}" checked>
-        <span>{{ column_labels.get(column, column) }}</span>
-      </label>
-      {% endfor %}
-      <label class="column-toggle">
-        <input type="checkbox" class="js-col-toggle" data-col="comment_count" checked>
-        <span>{{ column_labels.get('comment_count', 'Comments') }}</span>
-      </label>
-      <label class="column-toggle">
-        <input type="checkbox" class="js-col-toggle" data-col="actions" checked>
-        <span>Actions</span>
-      </label>
+  <div class="summary-controls">
+    <div class="summary-bar">
+      <span class="summary-pill">Total {{ summary.total }}</span>
+      <span class="summary-pill summary-unreviewed">Unreviewed {{ summary.unreviewed }}</span>
+      <span class="summary-pill summary-pass">Pass {{ summary.pass }}</span>
+      <span class="summary-pill summary-fail">Fail {{ summary.fail }}</span>
     </div>
-  </details>
+    <details class="column-toggle-panel">
+      <summary>Columns</summary>
+      <div class="column-toggle-grid">
+        {% for column in visible_columns %}
+        <label class="column-toggle">
+          <input type="checkbox" class="js-col-toggle" data-col="{{ column }}" checked>
+          <span>{{ column_labels.get(column, column) }}</span>
+        </label>
+        {% endfor %}
+        <label class="column-toggle">
+          <input type="checkbox" class="js-col-toggle" data-col="comment_count" checked>
+          <span>{{ column_labels.get('comment_count', 'Comments') }}</span>
+        </label>
+        <label class="column-toggle">
+          <input type="checkbox" class="js-col-toggle" data-col="actions" checked>
+          <span>Actions</span>
+        </label>
+      </div>
+    </details>
+  </div>
   <form method="post" action="{{ request.url_for('bulk_qc_update') }}">
     <input type="hidden" name="redirect_to" value="{{ request.url }}">
     <div class="bulkbar">
@@ -81,11 +83,9 @@
         class="secondary"
         onclick="return confirm('Delete the selected samples from the Virtitta database? This does not delete result files on disk.')"
       >Delete samples</button>
+      <input type="text" name="comment_author" placeholder="Comment author">
+      <input type="text" name="comment_body" placeholder="Comment for fail or note on selected samples" class="bulk-comment">
       <span class="count">{{ rows|length }} samples</span>
-    </div>
-    <div class="bulkbar">
-      <input type="text" name="comment_author" placeholder="QC comment author">
-      <input type="text" name="comment_body" placeholder="QC comment for fail or note added to selected samples">
     </div>
 
     <div class="table-wrap">
