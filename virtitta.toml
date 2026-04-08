@@ -23,6 +23,7 @@ visible_columns = [
   "qc_status",
   "typing_report_subtype",
   "typing_main_blast_identity",
+  "resistance_summary",
   "host_filter_reads_in",
   "host_filter_reads_removed_proportion",
   "qc_coverage_pct",

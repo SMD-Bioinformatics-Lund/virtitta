@@ -97,6 +97,71 @@
   </div>
 </section>
 
+<section class="panel">
+  <h3>Resistance</h3>
+  {% if resistance_analysis_present %}
+  <div class="resistance-panel">
+    <div class="resistance-matrix">
+      {% for cell in resistance_cells %}
+      <div class="resistance-drug">
+        <div class="resistance-drug-label">{{ cell["short"] }}</div>
+        <div class="resistance-box resistance-{{ cell['status'] }}" title="{{ cell['title'] }}"></div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="resistance-legend">
+      <span><span class="resistance-box resistance-resistant legend-box"></span> Detected</span>
+      <span><span class="resistance-box resistance-warning legend-box"></span> Probable</span>
+      <span><span class="resistance-box resistance-possible legend-box"></span> Possible</span>
+      <span><span class="resistance-box resistance-clear legend-box"></span> None</span>
+      <span><span class="resistance-box resistance-missing legend-box"></span> No data</span>
+    </div>
+  </div>
+  {% if resistance_has_calls %}
+  <div class="table-wrap">
+    <table class="detail-table">
+      <thead>
+        <tr>
+          <th>Mutation</th>
+          <th>Gene</th>
+          <th>Drugs</th>
+          <th>Prediction</th>
+          <th>Reference</th>
+          <th>IGV</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for mutation in resistance_mutations %}
+        <tr>
+          <td>
+            {% if mutation["locus"] %}
+            <a href="{{ request.url_for('sample_igv_mutation', sample_run_id=sample['sample_run_id'], mutation_index=mutation['index']) }}">{{ mutation["mutation_label"] }}</a>
+            {% else %}
+            {{ mutation["mutation_label"] }}
+            {% endif %}
+          </td>
+          <td>{{ mutation["gene"] }}</td>
+          <td>{{ mutation["drugs_text"] }}</td>
+          <td>{{ mutation["prediction"] }}</td>
+          <td class="detail-wrap">{{ mutation["reference"] }}</td>
+          <td>
+            {% if mutation["locus"] %}
+            <a class="mini-action" href="{{ request.url_for('sample_igv_mutation', sample_run_id=sample['sample_run_id'], mutation_index=mutation['index']) }}">Goto</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="muted">Resistance was analyzed and no resistance-associated mutations were detected.</div>
+  {% endif %}
+  {% else %}
+  <div class="muted">No resistance data available.</div>
+  {% endif %}
+</section>
+
 <section class="grid two-col">
   <div class="panel">
     <h3>Result Files</h3>

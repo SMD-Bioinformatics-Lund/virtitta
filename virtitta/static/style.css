@@ -218,6 +218,94 @@ button.secondary,
   flex: 1 1 280px;
 }
 
+.resistance-summary-cell {
+  display: inline-flex;
+  align-items: center;
+}
+
+.resistance-strip {
+  display: inline-flex;
+  gap: 2px;
+  align-items: end;
+}
+
+.resistance-strip-compact {
+  gap: 1px;
+}
+
+.resistance-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.resistance-matrix {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.resistance-drug {
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+}
+
+.resistance-drug-label {
+  font-size: 0.74rem;
+  color: #645b4e;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  line-height: 1;
+}
+
+.resistance-box {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px solid #b2aa9c;
+  background: #b8b8b8;
+}
+
+.resistance-strip-compact .resistance-box {
+  width: 9px;
+  height: 9px;
+}
+
+.legend-box {
+  width: 10px;
+  height: 10px;
+  vertical-align: -1px;
+}
+
+.resistance-resistant {
+  background: #d62828;
+}
+
+.resistance-warning {
+  background: #f4a442;
+}
+
+.resistance-possible {
+  background: #ffe45c;
+}
+
+.resistance-clear {
+  background: #62c96b;
+}
+
+.resistance-missing {
+  background: #d7d7d7;
+}
+
+.resistance-legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.84rem;
+  color: #645b4e;
+}
+
 .table-wrap {
   display: block;
   width: 100%;
@@ -374,6 +462,11 @@ button.secondary,
 
 .file-name {
   word-break: break-all;
+}
+
+.detail-wrap {
+  white-space: normal;
+  min-width: 320px;
 }
 
 .action-links {

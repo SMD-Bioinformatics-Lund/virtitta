@@ -61,6 +61,24 @@ IGV_TRACK_LINKS = [
 ]
 
 LIMS_EXPORT_HEADER = "sample_id\tparameter_name\tparameter_value\tcomment"
+HCV_RESISTANCE_DRUGS = [
+    ("Asunaprevir", "ASV"),
+    ("Boceprevir", "BOC"),
+    ("Glecaprevir", "GLE"),
+    ("Grazoprevir", "GZR"),
+    ("Paritaprevir", "PTV"),
+    ("Simeprevir", "SMV"),
+    ("Telaprevir", "TVR"),
+    ("Voxilaprevir", "VOX"),
+    ("Daclatasvir", "DCV"),
+    ("Elbasvir", "EBR"),
+    ("Ledipasvir", "LDV"),
+    ("Ombitasvir", "OBV"),
+    ("Pibrentasvir", "PIB"),
+    ("Velpatasvir", "VEL"),
+    ("Dasabuvir", "DSV"),
+    ("Sofosbuvir", "SOF"),
+]
 
 
 def format_value(value: object, column: str | None = None) -> str:
@@ -161,6 +179,95 @@ def comment_link_label(row: dict) -> str:
     if len(preview) > 11:
         preview = f"{preview[:11]}..."
     return f"{count} - {preview}"
+
+
+def resistance_prediction_status(prediction: str | None) -> str:
+    value = str(prediction or "").strip().lower()
+    if not value:
+        return "unknown"
+    if "resistant" in value:
+        return "resistant"
+    if "probable" in value or "intermediate" in value or "reduced" in value:
+        return "warning"
+    if "possible" in value:
+        return "possible"
+    return "warning"
+
+
+def resistance_status_label(status: str) -> str:
+    return {
+        "resistant": "Resistance detected",
+        "warning": "Probable resistance detected",
+        "possible": "Possible resistance detected",
+        "clear": "No resistance detected",
+        "missing": "No resistance data",
+    }.get(status, "Resistance status unknown")
+
+
+def build_resistance_cells(raw_sample: dict) -> list[dict]:
+    resistance = raw_sample.get("resistance", {}) if isinstance(raw_sample, dict) else {}
+    analysis_present = bool(resistance.get("analysis_present"))
+    lookup = {
+        item.get("drug"): item
+        for item in resistance.get("by_drug", [])
+        if isinstance(item, dict) and item.get("drug")
+    }
+
+    cells = []
+    for drug_name, short_label in HCV_RESISTANCE_DRUGS:
+        record = lookup.get(drug_name)
+        if record:
+            status = resistance_prediction_status(record.get("prediction"))
+            mutations = [item for item in record.get("mutations", []) if item]
+            prediction = record.get("prediction") or resistance_status_label(status)
+        else:
+            status = "clear" if analysis_present else "missing"
+            mutations = []
+            prediction = resistance_status_label(status)
+        title = f"{drug_name}: {prediction}"
+        if mutations:
+            title = f"{title} ({', '.join(mutations)})"
+        cells.append(
+            {
+                "drug": drug_name,
+                "short": short_label,
+                "status": status,
+                "prediction": prediction,
+                "mutations": mutations,
+                "title": title,
+            }
+        )
+
+    return cells
+
+
+def resistance_summary_text(raw_sample: dict) -> str:
+    resistance = raw_sample.get("resistance", {}) if isinstance(raw_sample, dict) else {}
+    if not resistance.get("analysis_present"):
+        return "No resistance data"
+    if not resistance.get("has_resistance"):
+        return "No resistance detected"
+    count = resistance.get("mutation_count") or 0
+    return f"{count} mutation{'s' if count != 1 else ''}"
+
+
+def build_resistance_mutations(raw_sample: dict, sample_id: str) -> list[dict]:
+    resistance = raw_sample.get("resistance", {}) if isinstance(raw_sample, dict) else {}
+    mutations = []
+    for index, mutation in enumerate(resistance.get("mutations", [])):
+        if not isinstance(mutation, dict):
+            continue
+        start = mutation.get("genomic_start")
+        end = mutation.get("genomic_end")
+        locus = None
+        if start and end:
+            locus = f"{sample_id}:{start}-{end}"
+        item = dict(mutation)
+        item["index"] = index
+        item["drugs_text"] = ", ".join(item.get("drugs", []) or [])
+        item["locus"] = locus
+        mutations.append(item)
+    return mutations
 
 
 def output_links(raw_sample: dict, link_specs: list[tuple[str, str]]) -> list[dict]:
@@ -321,6 +428,20 @@ def build_igv_url(config: Config, sample_row) -> str:
     return f"{config.igv.base_url}?{urlencode(query_items)}"
 
 
+def build_igv_goto_url(config: Config, locus: str) -> str:
+    if not config.features.igv or not config.igv.enabled:
+        raise HTTPException(status_code=404, detail="IGV integration is disabled")
+    parts = urlsplit(config.igv.base_url)
+    goto_path = "/goto"
+    if parts.path:
+        base_parts = parts.path.rstrip("/").split("/")
+        if len(base_parts) > 1:
+            goto_path = "/".join(base_parts[:-1] + ["goto"])
+        else:
+            goto_path = "/goto"
+    return urlunsplit((parts.scheme, parts.netloc, goto_path, urlencode({"locus": locus}), ""))
+
+
 def create_app(config_path: str | Path | None = None) -> FastAPI:
     config = load_config(config_path)
     connection = connect(config.database.path)
@@ -370,6 +491,11 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             subtypes = list_subtypes(connection)
         finally:
             connection.close()
+
+        for row in rows:
+            raw = raw_json_for_sample(row)
+            row["resistance_summary"] = build_resistance_cells(raw)
+            row["resistance_summary_text"] = resistance_summary_text(raw)
 
         return templates.TemplateResponse(
             request,
@@ -507,6 +633,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             except HTTPException:
                 igv_url = None
 
+        resistance_cells = build_resistance_cells(raw)
+        resistance_mutations = build_resistance_mutations(raw, sample_row["sample_id"])
+        resistance_summary = raw.get("resistance", {}) if isinstance(raw, dict) else {}
+
         return templates.TemplateResponse(
             request,
             "sample_detail.html",
@@ -520,6 +650,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "format_value": format_value,
                 "display_identifier": display_identifier,
                 "igv_url": igv_url,
+                "resistance_cells": resistance_cells,
+                "resistance_mutations": resistance_mutations,
+                "resistance_analysis_present": bool(resistance_summary.get("analysis_present")),
+                "resistance_has_calls": bool(resistance_summary.get("has_resistance")),
                 "warning_message": warning,
                 "qc_status_options": QC_STATUS_OPTIONS,
                 "detail_links": output_links(raw, DETAIL_FILE_LINKS),
@@ -618,5 +752,24 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             connection.close()
 
         return RedirectResponse(build_igv_url(config, sample_row), status_code=307)
+
+    @app.get("/samples/{sample_run_id}/igv/mutations/{mutation_index}")
+    def sample_igv_mutation(sample_run_id: str, mutation_index: int):
+        connection = connect(config.database.path)
+        try:
+            sample_row = get_sample(connection, sample_run_id)
+            if sample_row is None:
+                raise HTTPException(status_code=404, detail="Sample not found")
+        finally:
+            connection.close()
+
+        raw = raw_json_for_sample(sample_row)
+        mutations = build_resistance_mutations(raw, sample_row["sample_id"])
+        if mutation_index < 0 or mutation_index >= len(mutations):
+            raise HTTPException(status_code=404, detail="Resistance mutation not found")
+        locus = mutations[mutation_index].get("locus")
+        if not locus:
+            raise HTTPException(status_code=404, detail="No genomic locus available for mutation")
+        return RedirectResponse(build_igv_goto_url(config, locus), status_code=307)
 
     return app

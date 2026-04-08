@@ -15,6 +15,7 @@ SORTABLE_COLUMNS = {
     "run_name": "s.run_name",
     "typing_report_subtype": "s.typing_report_subtype",
     "typing_main_blast_identity": "s.typing_main_blast_identity",
+    "resistance_summary": "s.sample_id",
     "host_filter_reads_in": "s.host_filter_reads_in",
     "host_filter_reads_removed_proportion": "s.host_filter_reads_removed_proportion",
     "qc_coverage_pct": "s.qc_coverage_pct",

@@ -144,6 +144,14 @@
             <td class="col-{{ column }} {{ sticky_class }} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}"{% if column == 'host_filter_reads_removed_proportion' %} style="{{ cell_style(column, value) }}"{% endif %}>
               {% if column == 'lid' %}
               <a href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}">{{ display_identifier(row) }}</a>
+              {% elif column == 'resistance_summary' %}
+              <div class="resistance-summary-cell" title="{{ row['resistance_summary_text'] }}">
+                <div class="resistance-strip resistance-strip-compact">
+                  {% for cell in value %}
+                  <span class="resistance-box resistance-{{ cell['status'] }}" title="{{ cell['title'] }}"></span>
+                  {% endfor %}
+                </div>
+              </div>
               {% else %}
               {{ format_value(value, column) }}
               {% endif %}

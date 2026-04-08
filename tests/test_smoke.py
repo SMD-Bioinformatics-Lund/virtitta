@@ -10,8 +10,11 @@ from tempfile import TemporaryDirectory
 from starlette.requests import Request
 
 from virtitta.app import (
+    build_igv_goto_url,
     build_igv_url,
     build_lims_export_content,
+    build_resistance_cells,
+    build_resistance_mutations,
     cell_style,
     comment_link_label,
     create_app,
@@ -176,6 +179,12 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("SAMPLE001_resistance.gff", igv_url)
         self.assertIn("merge=false", igv_url)
 
+    def test_igv_goto_url_contains_mutation_locus(self) -> None:
+        config = load_config(self.config_path)
+        url = build_igv_goto_url(config, "SAMPLE001:6550-6552")
+        self.assertIn("/goto?", url)
+        self.assertIn("locus=SAMPLE001%3A6550-6552", url)
+
     def test_list_samples_supports_subtype_and_numeric_filters(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
@@ -226,6 +235,22 @@ class VirtittaSmokeTests(unittest.TestCase):
     def test_human_column_style_uses_data_bar_width(self) -> None:
         self.assertEqual(cell_style("host_filter_reads_removed_proportion", 0.0123), "--data-bar-width:1.230%;")
         self.assertEqual(cell_style("qc_mean_depth", 4.0), "")
+
+    def test_resistance_cells_render_detected_and_clear_states(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))[0]
+        cells = build_resistance_cells(fixture)
+        self.assertEqual(len(cells), 16)
+        by_short = {cell["short"]: cell for cell in cells}
+        self.assertEqual(by_short["DCV"]["status"], "resistant")
+        self.assertIn("NS5A:Y93H", by_short["DCV"]["mutations"])
+        self.assertEqual(by_short["ASV"]["status"], "clear")
+        self.assertEqual(by_short["SOF"]["status"], "clear")
+
+    def test_resistance_mutations_include_igv_locus(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))[0]
+        mutations = build_resistance_mutations(fixture, fixture["sample_id"])
+        self.assertEqual(mutations[0]["mutation_label"], "NS5A:Y93H")
+        self.assertEqual(mutations[0]["locus"], "SAMPLE001:6550-6552")
 
     def test_lims_export_reuses_existing_rows_and_appends_qc(self) -> None:
         config = load_config(self.config_path)
