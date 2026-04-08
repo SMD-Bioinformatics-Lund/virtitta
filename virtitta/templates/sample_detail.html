@@ -10,6 +10,9 @@
     <a class="button-link" href="{{ igv_url }}">Launch IGV</a>
     {% endif %}
     <a class="button-link secondary" href="{{ request.url_for('sample_lims_export', sample_run_id=sample['sample_run_id']) }}">Export LIMS</a>
+    <form method="post" action="{{ request.url_for('delete_single_sample', sample_run_id=sample['sample_run_id']) }}" onsubmit="return confirm('Delete this sample from the Virtitta database? This does not delete result files on disk.')" class="inline-form">
+      <button type="submit" class="secondary">Delete sample</button>
+    </form>
     <a class="button-link secondary" href="{{ request.url_for('index') }}">Back</a>
   </div>
 </section>
@@ -26,6 +29,8 @@
         <option value="{{ status }}" {% if status == sample['qc_status'] %}selected{% endif %}>{{ status }}</option>
         {% endfor %}
       </select>
+      <input type="text" name="comment_author" placeholder="QC comment author">
+      <textarea name="comment_body" rows="3" placeholder="Required when setting QC to fail. Saved as a comment if provided."></textarea>
       <button type="submit">Save QC</button>
     </form>
     <div class="meta-line">Last updated: {{ sample["qc_updated_at"] or "never" }}</div>
@@ -50,11 +55,11 @@
         <tr><th>Sample ID</th><td>{{ sample["sample_id"] }}</td></tr>
         <tr><th>Sample Run ID</th><td>{{ sample["sample_run_id"] }}</td></tr>
         <tr><th>Subtype</th><td>{{ format_value(sample["typing_report_subtype"]) }}</td></tr>
-        <tr><th>BLAST %</th><td>{{ format_value(sample["typing_main_blast_identity"]) }}</td></tr>
+        <tr><th>BLAST %</th><td>{{ format_value(sample["typing_main_blast_identity"], "typing_main_blast_identity") }}</td></tr>
         <tr><th>Reads In</th><td>{{ format_value(sample["host_filter_reads_in"]) }}</td></tr>
-        <tr><th>Hostile Removed</th><td>{{ format_value(sample["host_filter_reads_removed_proportion"]) }}</td></tr>
-        <tr><th>Coverage %</th><td>{{ format_value(sample["qc_coverage_pct"]) }}</td></tr>
-        <tr><th>Mean Depth</th><td>{{ format_value(sample["qc_mean_depth"]) }}</td></tr>
+        <tr><th>Human</th><td>{{ format_value(sample["host_filter_reads_removed_proportion"], "host_filter_reads_removed_proportion") }}</td></tr>
+        <tr><th>Coverage %</th><td>{{ format_value(sample["qc_coverage_pct"], "qc_coverage_pct") }}</td></tr>
+        <tr><th>Mean Depth</th><td>{{ format_value(sample["qc_mean_depth"], "qc_mean_depth") }}</td></tr>
         <tr><th>1x %</th><td>{{ format_value(sample["qc_coverage_1x_pct"]) }}</td></tr>
         <tr><th>10x %</th><td>{{ format_value(sample["qc_coverage_10x_pct"]) }}</td></tr>
         <tr><th>100x %</th><td>{{ format_value(sample["qc_coverage_100x_pct"]) }}</td></tr>
@@ -76,7 +81,12 @@
     <div class="comment-list">
       {% for comment in comments %}
       <article class="comment">
-        <div class="comment-meta">{{ comment["created_at"] }}{% if comment["author"] %} · {{ comment["author"] }}{% endif %}</div>
+        <div class="comment-head">
+          <div class="comment-meta">{{ comment["created_at"] }}{% if comment["author"] %} · {{ comment["author"] }}{% endif %}</div>
+          <form method="post" action="{{ request.url_for('remove_comment', sample_run_id=sample['sample_run_id'], comment_id=comment['id']) }}" onsubmit="return confirm('Delete this comment?')" class="inline-form">
+            <button type="submit" class="mini-action secondary">Delete</button>
+          </form>
+        </div>
         <div>{{ comment["body"] }}</div>
       </article>
       {% else %}

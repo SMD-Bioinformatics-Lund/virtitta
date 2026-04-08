@@ -74,7 +74,18 @@
       <button type="submit" name="qc_status" value="fail">Mark fail</button>
       <button type="submit" name="qc_status" value="unreviewed" class="secondary">Reset QC</button>
       <button type="submit" formaction="{{ request.url_for('bulk_lims_export') }}" formmethod="post" class="secondary">Export LIMS</button>
+      <button
+        type="submit"
+        formaction="{{ request.url_for('bulk_delete_samples') }}"
+        formmethod="post"
+        class="secondary"
+        onclick="return confirm('Delete the selected samples from the Virtitta database? This does not delete result files on disk.')"
+      >Delete samples</button>
       <span class="count">{{ rows|length }} samples</span>
+    </div>
+    <div class="bulkbar">
+      <input type="text" name="comment_author" placeholder="QC comment author">
+      <input type="text" name="comment_body" placeholder="QC comment for fail or note added to selected samples">
     </div>
 
     <div class="table-wrap">

@@ -11,7 +11,10 @@ from fastapi.templating import Jinja2Templates
 
 from virtitta.config import DEFAULT_COLUMN_LABELS, QC_STATUS_OPTIONS, Config, load_config
 from virtitta.repository import (
+    add_comment,
     connect,
+    delete_comment,
+    delete_samples,
     get_comments,
     get_sample,
     init_db,
@@ -20,7 +23,6 @@ from virtitta.repository import (
     list_samples,
     raw_json_for_sample,
     update_qc_status,
-    add_comment,
 )
 
 
@@ -244,6 +246,12 @@ def append_warning(url: str, message: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
 
 
+def request_url_without_warning(url: str) -> str:
+    parts = urlsplit(url)
+    query_items = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True) if key != "warning"]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
+
+
 def build_igv_url(config: Config, sample_row) -> str:
     if not config.features.igv or not config.igv.enabled:
         raise HTTPException(status_code=404, detail="IGV integration is disabled")
@@ -385,19 +393,44 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     async def bulk_qc_update(
         sample_run_id: list[str] = Form(default=[]),
         qc_status: str = Form(...),
+        comment_body: str = Form(default=""),
+        comment_author: str = Form(default=""),
         redirect_to: str = Form(default="/"),
     ):
         if qc_status not in QC_STATUS_OPTIONS:
             raise HTTPException(status_code=400, detail=f"Invalid QC status: {qc_status}")
         if not sample_run_id:
             return RedirectResponse(redirect_to, status_code=303)
+        if qc_status == "fail" and not comment_body.strip():
+            return RedirectResponse(
+                append_warning(redirect_to, "A comment is required when failing a sample."),
+                status_code=303,
+            )
 
         connection = connect(config.database.path)
         try:
             update_qc_status(connection, sample_run_id, qc_status)
+            if comment_body.strip():
+                for item in sample_run_id:
+                    add_comment(connection, item, comment_body, comment_author or None)
         finally:
             connection.close()
         return RedirectResponse(redirect_to, status_code=303)
+
+    @app.post("/samples/delete")
+    async def bulk_delete_samples(
+        sample_run_id: list[str] = Form(default=[]),
+        redirect_to: str = Form(default="/"),
+    ):
+        if not sample_run_id:
+            return RedirectResponse(redirect_to, status_code=303)
+
+        connection = connect(config.database.path)
+        try:
+            delete_samples(connection, sample_run_id)
+        finally:
+            connection.close()
+        return RedirectResponse(request_url_without_warning(redirect_to), status_code=303)
 
     @app.post("/samples/lims-export")
     async def bulk_lims_export(
@@ -486,6 +519,31 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         finally:
             connection.close()
         return RedirectResponse(f"/samples/{sample_run_id}", status_code=303)
+
+    @app.post("/samples/{sample_run_id}/comments/{comment_id}/delete")
+    async def remove_comment(sample_run_id: str, comment_id: int):
+        connection = connect(config.database.path)
+        try:
+            sample_row = get_sample(connection, sample_run_id)
+            if sample_row is None:
+                raise HTTPException(status_code=404, detail="Sample not found")
+            delete_comment(connection, sample_run_id, comment_id)
+        finally:
+            connection.close()
+        return RedirectResponse(f"/samples/{sample_run_id}#comments", status_code=303)
+
+    @app.post("/samples/{sample_run_id}/delete")
+    async def delete_single_sample(sample_run_id: str):
+        connection = connect(config.database.path)
+        try:
+            sample_row = get_sample(connection, sample_run_id)
+            if sample_row is None:
+                raise HTTPException(status_code=404, detail="Sample not found")
+            run_name = sample_row["run_name"]
+            delete_samples(connection, [sample_run_id])
+        finally:
+            connection.close()
+        return RedirectResponse(f"/?run_name={run_name}", status_code=303)
 
     @app.get("/samples/{sample_run_id}/files/{output_key}")
     def sample_file(sample_run_id: str, output_key: str):

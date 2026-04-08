@@ -344,5 +344,56 @@ def add_comment(connection: sqlite3.Connection, sample_run_id: str, body: str, a
     connection.commit()
 
 
+def delete_comment(connection: sqlite3.Connection, sample_run_id: str, comment_id: int) -> None:
+    connection.execute(
+        """
+        DELETE FROM sample_comments
+        WHERE id = ? AND sample_run_id = ?
+        """,
+        (comment_id, sample_run_id),
+    )
+    connection.commit()
+
+
+def delete_samples(connection: sqlite3.Connection, sample_run_ids: list[str]) -> None:
+    if not sample_run_ids:
+        return
+
+    run_names = [
+        row["run_name"]
+        for row in connection.execute(
+            f"""
+            SELECT DISTINCT run_name
+            FROM samples
+            WHERE sample_run_id IN ({",".join("?" for _ in sample_run_ids)})
+            """,
+            sample_run_ids,
+        ).fetchall()
+    ]
+
+    connection.execute(
+        f"""
+        DELETE FROM samples
+        WHERE sample_run_id IN ({",".join("?" for _ in sample_run_ids)})
+        """,
+        sample_run_ids,
+    )
+
+    for run_name in run_names:
+        remaining = connection.execute(
+            "SELECT COUNT(*) AS count FROM samples WHERE run_name = ?",
+            (run_name,),
+        ).fetchone()["count"]
+        if remaining:
+            connection.execute(
+                "UPDATE runs SET sample_count = ? WHERE run_name = ?",
+                (remaining, run_name),
+            )
+        else:
+            connection.execute("DELETE FROM runs WHERE run_name = ?", (run_name,))
+
+    connection.commit()
+
+
 def raw_json_for_sample(row: Mapping) -> dict:
     return json.loads(row["raw_json"])

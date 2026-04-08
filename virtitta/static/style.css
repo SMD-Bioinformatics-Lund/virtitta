@@ -74,7 +74,8 @@ a:hover {
 .filters,
 .bulkbar,
 .button-row,
-.split-header {
+.split-header,
+.comment-head {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -144,6 +145,11 @@ a:hover {
 
 .split-header {
   justify-content: space-between;
+}
+
+.comment-head {
+  justify-content: space-between;
+  margin-bottom: 4px;
 }
 
 input,
@@ -295,6 +301,11 @@ button.secondary,
 .stack {
   display: grid;
   gap: 8px;
+}
+
+.inline-form {
+  display: inline;
+  margin: 0;
 }
 
 .comment-list {

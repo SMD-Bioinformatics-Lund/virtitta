@@ -18,7 +18,7 @@ from virtitta.app import (
 )
 from virtitta.config import load_config
 from virtitta.importer import import_run
-from virtitta.repository import add_comment, connect, get_sample, list_samples, update_qc_status
+from virtitta.repository import add_comment, connect, get_comments, get_sample, list_runs, list_samples, update_qc_status
 
 
 FIXTURE_PATH = Path("/home/jonas/git/virpipa/assets/test_data/qc_summary/qc_summary.json")
@@ -268,6 +268,105 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertIn("/?run_name=fixture_run", response.headers["location"])
         self.assertIn("warning=", response.headers["location"])
+
+    def test_fail_qc_requires_comment(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/qc")
+
+        response = asyncio.run(
+            route.endpoint(
+                sample_run_id=["SAMPLE001_fixture_run"],
+                qc_status="fail",
+                comment_body="",
+                comment_author="",
+                redirect_to="/samples/SAMPLE001_fixture_run",
+            )
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("warning=", response.headers["location"])
+
+    def test_fail_qc_with_comment_adds_comment(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/qc")
+
+        response = asyncio.run(
+            route.endpoint(
+                sample_run_id=["SAMPLE001_fixture_run"],
+                qc_status="fail",
+                comment_body="Coverage too low",
+                comment_author="tester",
+                redirect_to="/samples/SAMPLE001_fixture_run",
+            )
+        )
+
+        self.assertEqual(response.status_code, 303)
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+            comments = get_comments(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertEqual(sample["qc_status"], "fail")
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(comments[0]["body"], "Coverage too low")
+        self.assertEqual(comments[0]["author"], "tester")
+
+    def test_delete_comment_route_removes_comment(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            add_comment(conn, "SAMPLE001_fixture_run", "Delete me", "tester")
+            comment_id = get_comments(conn, "SAMPLE001_fixture_run")[0]["id"]
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        route = next(
+            route
+            for route in app.router.routes
+            if getattr(route, "path", None) == "/samples/{sample_run_id}/comments/{comment_id}/delete"
+        )
+
+        response = asyncio.run(route.endpoint("SAMPLE001_fixture_run", comment_id))
+        self.assertEqual(response.status_code, 303)
+
+        conn = connect(config.database.path)
+        try:
+            comments = get_comments(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertEqual(comments, [])
+
+    def test_delete_single_sample_route_removes_sample_and_run(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(
+            route
+            for route in app.router.routes
+            if getattr(route, "path", None) == "/samples/{sample_run_id}/delete"
+        )
+
+        response = asyncio.run(route.endpoint("SAMPLE001_fixture_run"))
+        self.assertEqual(response.status_code, 303)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+            runs = list_runs(conn)
+        finally:
+            conn.close()
+
+        self.assertIsNone(sample)
+        self.assertEqual(runs, [])
 
 
 if __name__ == "__main__":
