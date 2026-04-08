@@ -43,6 +43,14 @@ default_sort_desc = true
 warn_over = 0.1
 danger_over = 0.5
 
+[ui.highlight_rules.qc_coverage_1x_pct]
+warn_under = 99
+danger_under = 97
+
+[ui.highlight_rules.qc_coverage_10x_pct]
+warn_under = 97
+danger_under = 95
+
 [ui.highlight_rules.qc_coverage_pct]
 warn_under = 95
 danger_under = 90
