@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 SORTABLE_COLUMNS = {
+    "generated_date": "s.generated_date",
     "sample_run_id": "s.sample_run_id",
     "sample_id": "s.sample_id",
     "lid": "s.lid",
@@ -50,6 +51,15 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _ensure_column(connection: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+    existing = {
+        row["name"]
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in existing:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
 def init_db(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
@@ -66,6 +76,7 @@ def init_db(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS samples (
             sample_run_id TEXT PRIMARY KEY,
             run_name TEXT NOT NULL REFERENCES runs(run_name) ON DELETE CASCADE,
+            generated_date TEXT,
             sample_id TEXT NOT NULL,
             lid TEXT,
             source_root_name TEXT,
@@ -108,6 +119,7 @@ def init_db(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_comments_sample_run_id ON sample_comments(sample_run_id);
         """
     )
+    _ensure_column(connection, "samples", "generated_date", "TEXT")
     connection.commit()
 
 
@@ -134,7 +146,7 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
     connection.execute(
         """
         INSERT INTO samples (
-            sample_run_id, run_name, sample_id, lid, source_root_name, sample_results_relpath,
+            sample_run_id, run_name, generated_date, sample_id, lid, source_root_name, sample_results_relpath,
             typing_report_subtype, typing_main_blast_identity,
             host_filter_reads_in, host_filter_reads_removed_proportion,
             qc_coverage_pct, qc_mean_depth, qc_coverage_1x_pct, qc_coverage_10x_pct,
@@ -143,7 +155,7 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
             raw_json, imported_at
         )
         VALUES (
-            :sample_run_id, :run_name, :sample_id, :lid, :source_root_name, :sample_results_relpath,
+            :sample_run_id, :run_name, :generated_date, :sample_id, :lid, :source_root_name, :sample_results_relpath,
             :typing_report_subtype, :typing_main_blast_identity,
             :host_filter_reads_in, :host_filter_reads_removed_proportion,
             :qc_coverage_pct, :qc_mean_depth, :qc_coverage_1x_pct, :qc_coverage_10x_pct,
@@ -153,6 +165,7 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
         )
         ON CONFLICT(sample_run_id) DO UPDATE SET
             run_name = excluded.run_name,
+            generated_date = excluded.generated_date,
             sample_id = excluded.sample_id,
             lid = excluded.lid,
             source_root_name = excluded.source_root_name,

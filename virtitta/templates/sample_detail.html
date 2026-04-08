@@ -53,10 +53,11 @@
       <tbody>
         <tr><th>LID</th><td>{{ format_value(sample["lid"]) }}</td></tr>
         <tr><th>Sample ID</th><td>{{ sample["sample_id"] }}</td></tr>
+        <tr><th>Date</th><td>{{ format_value(sample["generated_date"], "generated_date") }}</td></tr>
         <tr><th>Sample Run ID</th><td>{{ sample["sample_run_id"] }}</td></tr>
         <tr><th>Subtype</th><td>{{ format_value(sample["typing_report_subtype"]) }}</td></tr>
         <tr><th>BLAST %</th><td>{{ format_value(sample["typing_main_blast_identity"], "typing_main_blast_identity") }}</td></tr>
-        <tr><th>Reads In</th><td>{{ format_value(sample["host_filter_reads_in"]) }}</td></tr>
+        <tr><th>Reads In</th><td>{{ format_value(sample["host_filter_reads_in"], "host_filter_reads_in") }}</td></tr>
         <tr><th>Human</th><td>{{ format_value(sample["host_filter_reads_removed_proportion"], "host_filter_reads_removed_proportion") }}</td></tr>
         <tr><th>Coverage %</th><td>{{ format_value(sample["qc_coverage_pct"], "qc_coverage_pct") }}</td></tr>
         <tr><th>Mean Depth</th><td>{{ format_value(sample["qc_mean_depth"], "qc_mean_depth") }}</td></tr>

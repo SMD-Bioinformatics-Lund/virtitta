@@ -19,6 +19,7 @@ igv = true
 visible_columns = [
   "lid",
   "sample_id",
+  "generated_date",
   "qc_status",
   "typing_report_subtype",
   "typing_main_blast_identity",

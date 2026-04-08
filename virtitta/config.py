@@ -9,6 +9,7 @@ from pathlib import Path
 DEFAULT_VISIBLE_COLUMNS = [
     "lid",
     "sample_id",
+    "generated_date",
     "qc_status",
     "typing_report_subtype",
     "typing_main_blast_identity",
@@ -27,6 +28,7 @@ DEFAULT_VISIBLE_COLUMNS = [
 ]
 
 DEFAULT_COLUMN_LABELS = {
+    "generated_date": "Date",
     "sample_id": "Sample ID",
     "lid": "LID",
     "qc_status": "QC Status",

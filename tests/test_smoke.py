@@ -66,6 +66,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.sample_dir.mkdir(parents=True)
 
         fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["generated_at_utc"] = "2026-04-08T09:12:34Z"
         (self.run_dir / "pipeline_info" / "qc_summary.json").write_text(
             json.dumps(fixture),
             encoding="utf-8",
@@ -109,13 +110,13 @@ class VirtittaSmokeTests(unittest.TestCase):
         try:
             run = conn.execute("SELECT run_name, sample_count FROM runs").fetchone()
             sample = conn.execute(
-                "SELECT sample_run_id, sample_results_relpath FROM samples"
+                "SELECT sample_run_id, sample_results_relpath, generated_date FROM samples"
             ).fetchone()
         finally:
             conn.close()
 
         self.assertEqual(run, ("fixture_run", 1))
-        self.assertEqual(sample, ("SAMPLE001_fixture_run", "fixture_run/SAMPLE001/results"))
+        self.assertEqual(sample, ("SAMPLE001_fixture_run", "fixture_run/SAMPLE001/results", "2026-04-08"))
 
     def test_index_route_returns_template_response(self) -> None:
         config = load_config(self.config_path)
@@ -216,6 +217,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         )
 
     def test_format_value_applies_column_specific_rounding(self) -> None:
+        self.assertEqual(format_value(123456, "host_filter_reads_in"), "123 456")
         self.assertEqual(format_value(0.0123, "host_filter_reads_removed_proportion"), "1.2%")
         self.assertEqual(format_value(91.514, "typing_main_blast_identity"), "91.5")
         self.assertEqual(format_value(92.4598, "qc_coverage_pct"), "92.46")

@@ -25,6 +25,15 @@ def _find_matching_root(path: Path, roots: list[ResultsRoot]) -> tuple[ResultsRo
     return root, relpath
 
 
+def _extract_date_portion(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    return None
+
+
 def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpath: Path) -> dict:
     qc = sample.get("qc", {})
     coverage = qc.get("coverage_thresholds_pct", {})
@@ -35,6 +44,7 @@ def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpa
     return {
         "sample_run_id": sample["sample_run_id"],
         "run_name": sample["run_name"],
+        "generated_date": _extract_date_portion(sample.get("generated_at_utc")),
         "sample_id": sample["sample_id"],
         "lid": sample.get("lid"),
         "source_root_name": root_name,

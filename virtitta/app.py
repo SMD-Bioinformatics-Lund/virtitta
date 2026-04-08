@@ -66,6 +66,11 @@ LIMS_EXPORT_HEADER = "sample_id\tparameter_name\tparameter_value\tcomment"
 def format_value(value: object, column: str | None = None) -> str:
     if value is None:
         return ""
+    if column == "host_filter_reads_in":
+        try:
+            return f"{int(value):,}".replace(",", " ")
+        except (TypeError, ValueError):
+            return str(value)
     if column == "host_filter_reads_removed_proportion":
         return f"{float(value) * 100:.1f}%"
     if column == "typing_main_blast_identity":
