@@ -30,6 +30,8 @@ Important settings:
 
 - `database.path`
   - where the SQLite database is stored
+- `exports.lims_root`
+  - optional server-side export root for LIMS files
 - `results_roots`
   - one or more result roots that contain imported `virpipa` runs
 - `igv.base_url`
@@ -46,6 +48,9 @@ Example:
 ```toml
 [database]
 path = "data/virtitta.sqlite3"
+
+[exports]
+lims_root = "data/lims_exports"
 
 [igv]
 enabled = true
@@ -181,6 +186,25 @@ Virtitta can export:
 - multiple selected samples into one file
 
 Export is blocked if any selected sample is still `unreviewed`.
+
+Save location behavior:
+
+- the default `Export LIMS` action writes the export on the server under:
+  - `<lims_root>/<YYYY-MM-DD>/`
+- repeated exports on the same day keep unique filenames instead of overwriting earlier ones
+- browser download remains available as an explicit alternative from the export dropdown
+- if `exports.lims_root` is not configured, the default export action reports that as a warning instead of silently failing
+
+## Next Work
+
+Planned next larger feature:
+
+- clustering of selected isolates from within Virtitta
+  - run trimming
+  - align with MAFFT
+  - infer a tree with IQ-TREE 2
+  - render or serve the resulting tree in the interface
+  - keep this config-driven so tool paths, output locations, and enabled clustering behavior can be adjusted without code changes
 
 ## Notes
 

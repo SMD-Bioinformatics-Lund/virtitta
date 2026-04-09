@@ -10,6 +10,12 @@
     <a class="button-link" href="{{ igv_url }}">Launch IGV</a>
     {% endif %}
     <a class="button-link secondary" href="{{ request.url_for('sample_lims_export', sample_run_id=sample['sample_run_id']) }}">Export LIMS</a>
+    <details class="action-menu">
+      <summary>Export...</summary>
+      <div class="action-menu-list">
+        <a class="button-link secondary" href="{{ request.url_for('sample_lims_export_download', sample_run_id=sample['sample_run_id']) }}">Browser download</a>
+      </div>
+    </details>
     <form method="post" action="{{ request.url_for('delete_single_sample', sample_run_id=sample['sample_run_id']) }}" onsubmit="return confirm('Delete this sample from the Virtitta database? This does not delete result files on disk.')" class="inline-form">
       <button type="submit" class="secondary">Delete sample</button>
     </form>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path, PureWindowsPath
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -204,6 +205,25 @@ def resistance_status_label(status: str) -> str:
     }.get(status, "Resistance status unknown")
 
 
+def resistance_sort_key(raw_sample: dict) -> tuple:
+    severity_order = {
+        "missing": -1,
+        "clear": 0,
+        "possible": 1,
+        "warning": 2,
+        "resistant": 3,
+    }
+    cells = build_resistance_cells(raw_sample)
+    severities = [severity_order.get(cell["status"], -1) for cell in cells]
+    mutation_count = int(raw_sample.get("resistance", {}).get("mutation_count") or 0)
+    return (
+        max(severities, default=-1),
+        sum(severities),
+        mutation_count,
+        tuple(severities),
+    )
+
+
 def build_resistance_cells(raw_sample: dict) -> list[dict]:
     resistance = raw_sample.get("resistance", {}) if isinstance(raw_sample, dict) else {}
     analysis_present = bool(resistance.get("analysis_present"))
@@ -241,12 +261,37 @@ def build_resistance_cells(raw_sample: dict) -> list[dict]:
     return cells
 
 
+def resistance_tooltip_text(raw_sample: dict) -> str:
+    resistance = raw_sample.get("resistance", {}) if isinstance(raw_sample, dict) else {}
+    if not resistance.get("analysis_present"):
+        return "No resistance data"
+
+    lines: list[str] = []
+    for cell in build_resistance_cells(raw_sample):
+        if cell["status"] not in {"resistant", "warning", "possible"}:
+            continue
+        if cell["mutations"]:
+            lines.append(f"{cell['short']}: {', '.join(cell['mutations'])}")
+        else:
+            lines.append(f"{cell['short']}: {cell['prediction']}")
+
+    if not lines:
+        return "No resistance detected"
+    return "\n".join(lines)
+
+
 def resistance_summary_text(raw_sample: dict) -> str:
     resistance = raw_sample.get("resistance", {}) if isinstance(raw_sample, dict) else {}
     if not resistance.get("analysis_present"):
         return "No resistance data"
     if not resistance.get("has_resistance"):
         return "No resistance detected"
+    calls = []
+    for cell in build_resistance_cells(raw_sample):
+        if cell["status"] in {"resistant", "warning", "possible"}:
+            calls.append(cell["short"])
+    if calls:
+        return " ".join(calls)
     count = resistance.get("mutation_count") or 0
     return f"{count} mutation{'s' if count != 1 else ''}"
 
@@ -366,17 +411,49 @@ def lims_export_filename(sample_rows: list[dict]) -> str:
     return "virtitta-2limsrs.txt"
 
 
+def write_server_lims_export(config: Config, sample_rows: list[dict], content: str) -> Path | None:
+    if config.exports.lims_root is None:
+        return None
+
+    export_dir = config.exports.lims_root / datetime.now().date().isoformat()
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    base_name = lims_export_filename(sample_rows)
+    candidate = export_dir / base_name
+    stem = candidate.stem
+    suffix = candidate.suffix
+    counter = 2
+    while candidate.exists():
+        candidate = export_dir / f"{stem}-{counter}{suffix}"
+        counter += 1
+
+    candidate.write_text(content, encoding="utf-8")
+    return candidate
+
+
 def append_warning(url: str, message: str) -> str:
+    return append_message(url, "warning", message)
+
+
+def append_notice(url: str, message: str) -> str:
+    return append_message(url, "notice", message)
+
+
+def append_message(url: str, key: str, message: str) -> str:
     parts = urlsplit(url)
     query_items = parse_qsl(parts.query, keep_blank_values=True)
-    query_items = [(key, value) for key, value in query_items if key != "warning"]
-    query_items.append(("warning", message))
+    query_items = [(item_key, value) for item_key, value in query_items if item_key != key]
+    query_items.append((key, message))
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
 
 
-def request_url_without_warning(url: str) -> str:
+def request_url_without_messages(url: str) -> str:
     parts = urlsplit(url)
-    query_items = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True) if key != "warning"]
+    query_items = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key not in {"warning", "notice"}
+    ]
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
 
 
@@ -460,6 +537,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         subtype: str = Query(default=""),
         qc_status: str = Query(default=""),
         warning: str = Query(default=""),
+        notice: str = Query(default=""),
         min_coverage_pct: str = Query(default=""),
         min_mean_depth: str = Query(default=""),
         min_blast_identity: str = Query(default=""),
@@ -496,6 +574,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raw = raw_json_for_sample(row)
             row["resistance_summary"] = build_resistance_cells(raw)
             row["resistance_summary_text"] = resistance_summary_text(raw)
+            row["resistance_summary_tooltip"] = resistance_tooltip_text(raw)
+            row["resistance_sort_key"] = resistance_sort_key(raw)
+
+        if sort == "resistance_summary":
+            rows.sort(
+                key=lambda row: (row["resistance_sort_key"], row["sample_run_id"]),
+                reverse=desc,
+            )
 
         return templates.TemplateResponse(
             request,
@@ -527,6 +613,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "min_blast_identity": min_blast_identity,
                 "max_ct": max_ct,
                 "warning_message": warning,
+                "notice_message": notice,
                 "qc_status_options": QC_STATUS_OPTIONS,
                 "summary": {
                     "total": len(rows),
@@ -578,10 +665,48 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             delete_samples(connection, sample_run_id)
         finally:
             connection.close()
-        return RedirectResponse(request_url_without_warning(redirect_to), status_code=303)
+        return RedirectResponse(request_url_without_messages(redirect_to), status_code=303)
 
     @app.post("/samples/lims-export")
     async def bulk_lims_export(
+        sample_run_id: list[str] = Form(default=[]),
+        redirect_to: str = Form(default="/"),
+    ):
+        if not sample_run_id:
+            return RedirectResponse(redirect_to, status_code=303)
+
+        connection = connect(config.database.path)
+        try:
+            sample_rows = []
+            for item in sample_run_id:
+                sample_row = get_sample(connection, item)
+                if sample_row is not None:
+                    sample_rows.append(sample_row)
+        finally:
+            connection.close()
+
+        if not sample_rows:
+            raise HTTPException(status_code=404, detail="No matching samples found")
+        if any(row.get("qc_status") == "unreviewed" for row in sample_rows):
+            return RedirectResponse(
+                append_warning(redirect_to, "LIMS export is blocked for unreviewed samples."),
+                status_code=303,
+            )
+
+        content = build_lims_export_content(config, sample_rows)
+        export_path = write_server_lims_export(config, sample_rows, content)
+        if export_path is None:
+            return RedirectResponse(
+                append_warning(redirect_to, "No server-side LIMS export root is configured."),
+                status_code=303,
+            )
+        return RedirectResponse(
+            append_notice(redirect_to, f"LIMS export written to {export_path}"),
+            status_code=303,
+        )
+
+    @app.post("/samples/lims-export/download")
+    async def bulk_lims_export_download(
         sample_run_id: list[str] = Form(default=[]),
         redirect_to: str = Form(default="/"),
     ):
@@ -615,7 +740,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         )
 
     @app.get("/samples/{sample_run_id}", response_class=HTMLResponse)
-    def sample_detail(request: Request, sample_run_id: str, warning: str = Query(default="")):
+    def sample_detail(
+        request: Request,
+        sample_run_id: str,
+        warning: str = Query(default=""),
+        notice: str = Query(default=""),
+    ):
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
@@ -655,6 +785,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "resistance_analysis_present": bool(resistance_summary.get("analysis_present")),
                 "resistance_has_calls": bool(resistance_summary.get("has_resistance")),
                 "warning_message": warning,
+                "notice_message": notice,
                 "qc_status_options": QC_STATUS_OPTIONS,
                 "detail_links": output_links(raw, DETAIL_FILE_LINKS),
                 "igv_track_links": output_links(raw, IGV_TRACK_LINKS),
@@ -674,7 +805,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             add_comment(connection, sample_run_id, body, author or None)
         finally:
             connection.close()
-        return RedirectResponse(f"/samples/{sample_run_id}", status_code=303)
+        return RedirectResponse(request_url_without_messages(f"/samples/{sample_run_id}"), status_code=303)
 
     @app.post("/samples/{sample_run_id}/comments/{comment_id}/delete")
     async def remove_comment(sample_run_id: str, comment_id: int):
@@ -686,7 +817,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             delete_comment(connection, sample_run_id, comment_id)
         finally:
             connection.close()
-        return RedirectResponse(f"/samples/{sample_run_id}#comments", status_code=303)
+        return RedirectResponse(request_url_without_messages(f"/samples/{sample_run_id}#comments"), status_code=303)
 
     @app.post("/samples/{sample_run_id}/delete")
     async def delete_single_sample(sample_run_id: str):
@@ -699,7 +830,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             delete_samples(connection, [sample_run_id])
         finally:
             connection.close()
-        return RedirectResponse(f"/?run_name={run_name}", status_code=303)
+        return RedirectResponse(request_url_without_messages(f"/?run_name={run_name}"), status_code=303)
 
     @app.get("/samples/{sample_run_id}/files/{output_key}")
     def sample_file(sample_run_id: str, output_key: str):
@@ -716,6 +847,40 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.get("/samples/{sample_run_id}/lims-export")
     def sample_lims_export(sample_run_id: str):
+        connection = connect(config.database.path)
+        try:
+            sample_row = get_sample(connection, sample_run_id)
+            if sample_row is None:
+                raise HTTPException(status_code=404, detail="Sample not found")
+        finally:
+            connection.close()
+
+        if sample_row.get("qc_status") == "unreviewed":
+            return RedirectResponse(
+                append_warning(
+                    f"/samples/{sample_run_id}",
+                    "LIMS export is blocked until QC is marked pass or fail.",
+                ),
+                status_code=303,
+            )
+
+        content = build_lims_export_content(config, [sample_row])
+        export_path = write_server_lims_export(config, [sample_row], content)
+        if export_path is None:
+            return RedirectResponse(
+                append_warning(
+                    f"/samples/{sample_run_id}",
+                    "No server-side LIMS export root is configured.",
+                ),
+                status_code=303,
+            )
+        return RedirectResponse(
+            append_notice(f"/samples/{sample_run_id}", f"LIMS export written to {export_path}"),
+            status_code=303,
+        )
+
+    @app.get("/samples/{sample_run_id}/lims-export/download")
+    def sample_lims_export_download(sample_run_id: str):
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)

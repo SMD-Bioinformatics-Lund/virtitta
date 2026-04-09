@@ -31,6 +31,7 @@ state in a relational database, and exposes a compact web UI for triage, comment
 Keep runtime behavior configurable in `virtitta.toml`:
 
 - database path
+- server-side export roots
 - results roots
 - Linux-to-Windows path mappings for IGV
 - enabled features
@@ -71,12 +72,60 @@ python -m compileall virtitta
 - Main page is a dense table of samples.
 - Sorting and filtering must be easy and fast.
 - Bulk QC assignment must be supported.
-- Per-sample detail page must show the imported metrics, comments, review state, rug plot, and IGV launch actions.
+- Per-sample detail page must show the imported metrics, comments, review state, rug plot, resistance summary, and IGV actions.
 - Use compact spacing everywhere unless a larger layout is clearly justified by readability.
+- Prefer presentation-first identifiers in the UI:
+  - `LID` should be the primary visible identifier where available.
+  - `sample_id` remains the technical identity used for `sample_run_id`, IGV track loading, and file naming unless upstream changes make that unnecessary.
+
+## Current behavior to preserve
+
+- Import from `virpipa` `pipeline_info/qc_summary.json`.
+- Preserve Virtitta-owned review state across re-import.
+- Main table currently supports:
+  - dense filtering and sorting
+  - sticky first columns
+  - column toggles
+  - bulk QC updates
+  - comments with hover preview
+  - IGV launch
+  - LIMS export
+  - compact resistance strip
+- The resistance strip is intentionally fixed to the full geno2pheno HCV drug set and should not vary in length between samples.
+- Native browser `title` tooltips are currently used in the main table; if tooltip timing/formatting changes are needed later, switch deliberately to a custom tooltip implementation rather than partially mixing both.
+
+## Web UI constraints
+
+- Browser downloads can suggest filenames but cannot force a client-side save path.
+- If a feature needs files written automatically into a designated directory, be explicit whether that means:
+  - client-side download behavior, which is browser-controlled, or
+  - server-side export behavior, which can be implemented with a configured server path.
+- Current LIMS behavior supports server-side writing when `exports.lims_root` is configured:
+  - the default export action writes to the server-side path
+  - write under `<lims_root>/<YYYY-MM-DD>/`
+  - avoid overwriting existing files by creating a unique filename
+  - browser download is a separate explicit alternative, not the default action
+  - show user feedback after export so the operator can see that the write completed
+
+## Planned next larger feature
+
+- Add isolate clustering from selected samples.
+- Expected first implementation:
+  - select samples in the main table
+  - derive/export the appropriate FASTA inputs
+  - run trimming if needed
+  - align with MAFFT
+  - infer phylogeny with IQ-TREE 2
+  - store outputs in a predictable configured location
+  - expose tree viewing/downloading in the UI
+- Keep clustering configuration-driven:
+  - tool paths or container commands
+  - working/output directories
+  - enabled/disabled feature flags
+  - virus-specific defaults if HCV-specific assumptions are introduced
 
 ## Future-proofing
 
 - Keep the importer/repository boundary narrow so storage can be changed later if needed.
 - Keep virus-specific ingest/display adapters separate from the core review app.
 - When adding new upstream fields from `virpipa`, prefer additive schema changes and update fixture-backed import tests.
-

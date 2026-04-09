@@ -85,6 +85,12 @@ a:hover {
   font-weight: 600;
 }
 
+.notice-banner {
+  background: #dcefd7;
+  border-color: #8bb48b;
+  font-weight: 600;
+}
+
 .filters,
 .bulkbar,
 .button-row,
@@ -128,6 +134,48 @@ a:hover {
   cursor: pointer;
   font-size: 0.86rem;
   user-select: none;
+}
+
+.action-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.action-menu summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 5px 7px;
+  border: 1px solid #978d7f;
+  background: #f4f0e7;
+  color: var(--ink);
+}
+
+.action-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.action-menu[open] .action-menu-list {
+  display: grid;
+}
+
+.action-menu-list {
+  display: none;
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 20;
+  min-width: 140px;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10);
+}
+
+.action-menu-list .button-link,
+.action-menu-list button {
+  width: 100%;
+  text-align: left;
 }
 
 .column-toggle-grid {
@@ -225,12 +273,14 @@ button.secondary,
 
 .resistance-strip {
   display: inline-flex;
-  gap: 2px;
+  gap: 0;
   align-items: end;
+  overflow: hidden;
+  border-radius: 2px;
 }
 
 .resistance-strip-compact {
-  gap: 1px;
+  gap: 0;
 }
 
 .resistance-panel {
@@ -261,15 +311,14 @@ button.secondary,
 
 .resistance-box {
   display: inline-block;
-  width: 12px;
-  height: 12px;
-  border: 1px solid #b2aa9c;
+  width: 6px;
+  height: 10px;
   background: #b8b8b8;
 }
 
 .resistance-strip-compact .resistance-box {
-  width: 9px;
-  height: 9px;
+  width: 5px;
+  height: 10px;
 }
 
 .legend-box {

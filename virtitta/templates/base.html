@@ -24,6 +24,9 @@
     {% if warning_message %}
     <section class="panel warning-banner">{{ warning_message }}</section>
     {% endif %}
+    {% if notice_message %}
+    <section class="panel notice-banner">{{ notice_message }}</section>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>

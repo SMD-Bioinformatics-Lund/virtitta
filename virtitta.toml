@@ -15,6 +15,9 @@ comments = true
 bulk_qc = true
 igv = true
 
+[exports]
+lims_root = "data/lims_exports"
+
 [ui]
 visible_columns = [
   "lid",

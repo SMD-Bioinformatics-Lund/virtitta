@@ -234,9 +234,9 @@ def list_samples(
     params: list[object] = []
 
     if search:
-        clauses.append("(s.sample_id LIKE ? OR COALESCE(s.lid, '') LIKE ? OR s.run_name LIKE ?)")
+        clauses.append("(s.sample_id LIKE ? OR COALESCE(s.lid, '') LIKE ? OR s.run_name LIKE ? OR s.raw_json LIKE ?)")
         needle = f"%{search}%"
-        params.extend([needle, needle, needle])
+        params.extend([needle, needle, needle, needle])
     if run_name:
         clauses.append("s.run_name = ?")
         params.append(run_name)

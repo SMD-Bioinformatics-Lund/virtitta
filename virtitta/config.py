@@ -88,6 +88,11 @@ class FeatureSettings:
 
 
 @dataclass(frozen=True)
+class ExportSettings:
+    lims_root: Path | None = None
+
+
+@dataclass(frozen=True)
 class UiSettings:
     visible_columns: list[str] = field(default_factory=lambda: list(DEFAULT_VISIBLE_COLUMNS))
     default_sort: str = "run_name"
@@ -110,6 +115,7 @@ class Config:
     database: DatabaseSettings
     igv: IgvSettings
     features: FeatureSettings
+    exports: ExportSettings
     ui: UiSettings
     results_roots: list[ResultsRoot]
 
@@ -151,6 +157,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
     db_raw = raw.get("database", {})
     igv_raw = raw.get("igv", {})
     features_raw = raw.get("features", {})
+    exports_raw = raw.get("exports", {})
     ui_raw = raw.get("ui", {})
     root_entries = raw.get("results_roots", [])
 
@@ -185,6 +192,15 @@ def load_config(config_path: str | Path | None = None) -> Config:
             comments=bool(features_raw.get("comments", True)),
             bulk_qc=bool(features_raw.get("bulk_qc", True)),
             igv=bool(features_raw.get("igv", True)),
+        ),
+        exports=ExportSettings(
+            lims_root=(
+                (base_dir / exports_raw["lims_root"]).resolve()
+                if exports_raw.get("lims_root") and not Path(exports_raw["lims_root"]).is_absolute()
+                else Path(exports_raw["lims_root"]).resolve()
+            )
+            if exports_raw.get("lims_root")
+            else None
         ),
         ui=UiSettings(
             visible_columns=visible_columns,

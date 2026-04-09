@@ -15,6 +15,7 @@ from virtitta.app import (
     build_lims_export_content,
     build_resistance_cells,
     build_resistance_mutations,
+    resistance_tooltip_text,
     cell_style,
     comment_link_label,
     create_app,
@@ -37,6 +38,9 @@ def write_test_config(config_path: Path, *, root: Path, db_path: Path) -> None:
                 "",
                 "[database]",
                 f'path = "{db_path.as_posix()}"',
+                "",
+                "[exports]",
+                f'lims_root = "{(root / "lims_exports").as_posix()}"',
                 "",
                 "[igv]",
                 "enabled = true",
@@ -246,11 +250,81 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(by_short["ASV"]["status"], "clear")
         self.assertEqual(by_short["SOF"]["status"], "clear")
 
+    def test_resistance_tooltip_only_lists_positive_calls(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))[0]
+        tooltip = resistance_tooltip_text(fixture)
+        self.assertIn("DCV: NS5A:Y93H", tooltip)
+        self.assertIn("EBR: NS5A:Y93H", tooltip)
+        self.assertNotIn("SOF", tooltip)
+        self.assertNotIn("No resistance detected", tooltip)
+
     def test_resistance_mutations_include_igv_locus(self) -> None:
         fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))[0]
         mutations = build_resistance_mutations(fixture, fixture["sample_id"])
         self.assertEqual(mutations[0]["mutation_label"], "NS5A:Y93H")
         self.assertEqual(mutations[0]["locus"], "SAMPLE001:6550-6552")
+
+    def test_search_matches_resistance_content_and_sort_prioritizes_positive_profiles(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        resistant = fixture[0]
+        clear = json.loads(json.dumps(resistant))
+        clear["sample_id"] = "SAMPLE002"
+        clear["sample_run_id"] = "SAMPLE002_fixture_run"
+        clear["lid"] = "LID002"
+        clear["resistance"]["has_resistance"] = False
+        clear["resistance"]["mutation_count"] = 0
+        clear["resistance"]["by_drug"] = []
+        clear["resistance"]["mutations"] = []
+        (self.run_dir / "pipeline_info" / "qc_summary.json").write_text(
+            json.dumps([resistant, clear]),
+            encoding="utf-8",
+        )
+
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            rows = list_samples(conn, search="Y93H")
+        finally:
+            conn.close()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["sample_id"], "SAMPLE001")
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": "/",
+                "raw_path": b"/",
+                "query_string": b"",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "app": app,
+                "router": app.router,
+            }
+        )
+        response = route.endpoint(
+            request,
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="resistance_summary",
+            desc=True,
+        )
+        rows = response.context["rows"]
+        self.assertEqual(rows[0]["sample_id"], "SAMPLE001")
+        self.assertEqual(rows[1]["sample_id"], "SAMPLE002")
 
     def test_lims_export_reuses_existing_rows_and_appends_qc(self) -> None:
         config = load_config(self.config_path)
@@ -273,6 +347,28 @@ class VirtittaSmokeTests(unittest.TestCase):
             ),
         )
 
+    def test_lims_export_is_written_to_server_export_root(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        export_text = build_lims_export_content(config, [sample])
+
+        from virtitta.app import write_server_lims_export
+
+        export_path = write_server_lims_export(config, [sample], export_text)
+        self.assertIsNotNone(export_path)
+        assert export_path is not None
+        self.assertTrue(export_path.exists())
+        self.assertEqual(export_path.parent.name, __import__("datetime").datetime.now().date().isoformat())
+        self.assertEqual(export_path.read_text(encoding="utf-8"), export_text)
+
     def test_single_sample_lims_export_blocks_unreviewed(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
@@ -286,6 +382,47 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertIn("/samples/SAMPLE001_fixture_run", response.headers["location"])
         self.assertIn("warning=", response.headers["location"])
+
+    def test_single_sample_lims_export_writes_server_file_and_redirects_with_notice(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        route = next(
+            route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/lims-export"
+        )
+        response = route.endpoint("SAMPLE001_fixture_run")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("notice=", response.headers["location"])
+
+        export_root = self.root / "lims_exports"
+        exported = list(export_root.glob("*/*.txt"))
+        self.assertEqual(len(exported), 1)
+        self.assertIn("LID001\thcvqc\tpassed\t", exported[0].read_text(encoding="utf-8"))
+
+    def test_single_sample_lims_export_download_returns_attachment(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        route = next(
+            route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/lims-export/download"
+        )
+        response = route.endpoint("SAMPLE001_fixture_run")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('attachment; filename="LID001-2limsrs.txt"', response.headers["content-disposition"])
 
     def test_bulk_lims_export_blocks_unreviewed(self) -> None:
         config = load_config(self.config_path)
@@ -303,6 +440,48 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertIn("/?run_name=fixture_run", response.headers["location"])
         self.assertIn("warning=", response.headers["location"])
+
+    def test_bulk_lims_export_writes_server_file_and_redirects_with_notice(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/lims-export")
+        response = asyncio.run(
+            route.endpoint(
+                sample_run_id=["SAMPLE001_fixture_run"],
+                redirect_to="/?run_name=fixture_run",
+            )
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("notice=", response.headers["location"])
+
+    def test_bulk_lims_export_download_returns_attachment(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/lims-export/download")
+        response = asyncio.run(
+            route.endpoint(
+                sample_run_id=["SAMPLE001_fixture_run"],
+                redirect_to="/?run_name=fixture_run",
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('attachment; filename="LID001-2limsrs.txt"', response.headers["content-disposition"])
 
     def test_fail_qc_requires_comment(self) -> None:
         config = load_config(self.config_path)

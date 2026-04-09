@@ -76,6 +76,12 @@
       <button type="submit" name="qc_status" value="fail">Mark fail</button>
       <button type="submit" name="qc_status" value="unreviewed" class="secondary">Reset QC</button>
       <button type="submit" formaction="{{ request.url_for('bulk_lims_export') }}" formmethod="post" class="secondary">Export LIMS</button>
+      <details class="action-menu">
+        <summary>Export...</summary>
+        <div class="action-menu-list">
+          <button type="submit" formaction="{{ request.url_for('bulk_lims_export_download') }}" formmethod="post" class="secondary">Browser download</button>
+        </div>
+      </details>
       <button
         type="submit"
         formaction="{{ request.url_for('bulk_delete_samples') }}"
@@ -145,10 +151,10 @@
               {% if column == 'lid' %}
               <a href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}">{{ display_identifier(row) }}</a>
               {% elif column == 'resistance_summary' %}
-              <div class="resistance-summary-cell" title="{{ row['resistance_summary_text'] }}">
+              <div class="resistance-summary-cell" title="{{ row['resistance_summary_tooltip'] }}">
                 <div class="resistance-strip resistance-strip-compact">
                   {% for cell in value %}
-                  <span class="resistance-box resistance-{{ cell['status'] }}" title="{{ cell['title'] }}"></span>
+                  <span class="resistance-box resistance-{{ cell['status'] }}"></span>
                   {% endfor %}
                 </div>
               </div>
