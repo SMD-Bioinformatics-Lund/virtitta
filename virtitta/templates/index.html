@@ -80,6 +80,9 @@
         <summary>Export...</summary>
         <div class="action-menu-list">
           <button type="submit" formaction="{{ request.url_for('bulk_lims_export_download') }}" formmethod="post" class="secondary">Browser download</button>
+          <button type="button" class="secondary" data-export-table>Table to clipboard</button>
+          <button type="button" class="secondary" data-export-clipboard="{{ request.url_for('bulk_fasta_clipboard_export') }}">FASTA to clipboard</button>
+          <button type="button" class="secondary" data-export-clipboard="{{ request.url_for('bulk_iupac_fasta_clipboard_export') }}">15% IUPAC FASTA to clipboard</button>
         </div>
       </details>
       <button
@@ -147,7 +150,7 @@
             {% elif loop.index == 3 %}
               {% set sticky_class = 'sticky-col sticky-qc-status' %}
             {% endif %}
-            <td class="col-{{ column }} {{ sticky_class }} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}"{% if column == 'host_filter_reads_removed_proportion' %} style="{{ cell_style(column, value) }}"{% endif %}>
+            <td class="col-{{ column }} {{ sticky_class }} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}"{% if column == 'host_filter_reads_removed_proportion' %} style="{{ cell_style(column, value) }}"{% endif %}{% if column == 'resistance_summary' %} data-export-value="{{ row['resistance_summary_tooltip'].replace('\n', ', ') }}"{% endif %}>
               {% if column == 'lid' %}
               <a href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}">{{ display_identifier(row) }}</a>
               {% elif column == 'resistance_summary' %}
@@ -188,7 +191,131 @@
   </form>
 </section>
 
+<section id="client-notice" class="panel notice-banner client-notice" hidden></section>
+<section id="clipboard-modal" class="clipboard-modal" hidden>
+  <div class="clipboard-modal-panel">
+    <div class="comment-head">
+      <strong id="clipboard-modal-title">Clipboard export</strong>
+      <button type="button" class="secondary" id="clipboard-close">Close</button>
+    </div>
+    <div class="muted">Direct clipboard access was blocked by the browser. The content is selected below for manual copy.</div>
+    <textarea id="clipboard-modal-text" rows="14" spellcheck="false" readonly></textarea>
+    <div class="button-row">
+      <button type="button" id="clipboard-copy">Copy</button>
+      <button type="button" class="secondary" id="clipboard-close-2">Close</button>
+    </div>
+  </div>
+</section>
+
 <script>
+const bulkForm = document.querySelector('form[action="{{ request.url_for("bulk_qc_update") }}"]');
+const clientNotice = document.getElementById('client-notice');
+const clipboardModal = document.getElementById('clipboard-modal');
+const clipboardModalTitle = document.getElementById('clipboard-modal-title');
+const clipboardModalText = document.getElementById('clipboard-modal-text');
+
+function showClientNotice(message, isError = false) {
+  clientNotice.textContent = message;
+  clientNotice.hidden = false;
+  clientNotice.classList.toggle('warning-banner', isError);
+  clientNotice.classList.toggle('notice-banner', !isError);
+}
+
+function showClipboardModal(text, title) {
+  clipboardModalTitle.textContent = title;
+  clipboardModalText.value = text;
+  clipboardModal.hidden = false;
+  clipboardModalText.focus();
+  clipboardModalText.select();
+  clipboardModalText.setSelectionRange(0, clipboardModalText.value.length);
+}
+
+function hideClipboardModal() {
+  clipboardModal.hidden = true;
+}
+
+function selectedSampleIds() {
+  return Array.from(document.querySelectorAll('input[type="checkbox"][name="sample_run_id"]:checked')).map(box => box.value);
+}
+
+async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (error) {
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '-1000px';
+  textarea.style.left = '-1000px';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  if (!copied) {
+    return false;
+  }
+  return true;
+}
+
+async function fetchClipboardExport(url, title) {
+  const ids = selectedSampleIds();
+  if (!ids.length) {
+    showClientNotice('No samples selected for export.', true);
+    return;
+  }
+  const formData = new FormData();
+  for (const id of ids) {
+    formData.append('sample_run_id', id);
+  }
+  const response = await fetch(url, { method: 'POST', body: formData });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Clipboard export failed (${response.status})`);
+  }
+  const text = await response.text();
+  if (await copyTextToClipboard(text)) {
+    showClientNotice('Copied export content to clipboard.');
+    return;
+  }
+  showClipboardModal(text, title);
+  showClientNotice('Clipboard write was blocked. Manual copy dialog opened.', true);
+}
+
+function tableTextFromVisibleColumns() {
+  const table = document.querySelector('.dense-table');
+  const rows = [];
+  const exportable = cell => (
+    !cell.classList.contains('col-hidden') &&
+    !cell.classList.contains('sticky-select') &&
+    !cell.classList.contains('col-actions')
+  );
+  const headerCells = Array.from(table.querySelectorAll('thead th')).filter(exportable);
+  rows.push(headerCells.map(cell => cell.innerText.trim()).join('\t'));
+
+  for (const row of table.querySelectorAll('tbody tr')) {
+    if (row.querySelector('.empty-state')) {
+      continue;
+    }
+    const cells = Array.from(row.children).filter(exportable);
+    rows.push(cells.map(cell => {
+      const exportValue = cell.dataset.exportValue;
+      if (exportValue !== undefined) {
+        return exportValue.trim();
+      }
+      return cell.innerText.trim().replace(/\s+/g, ' ');
+    }).join('\t'));
+  }
+  return rows.join('\n') + '\n';
+}
+
 for (const button of document.querySelectorAll('[data-select-all]')) {
   button.addEventListener('click', () => {
     document.querySelectorAll('input[type="checkbox"][name="sample_run_id"]').forEach(box => { box.checked = true; });
@@ -209,5 +336,47 @@ for (const toggle of document.querySelectorAll('.js-col-toggle')) {
     });
   });
 }
+
+for (const button of document.querySelectorAll('[data-export-table]')) {
+  button.addEventListener('click', async () => {
+    try {
+      const text = tableTextFromVisibleColumns();
+      if (await copyTextToClipboard(text)) {
+        showClientNotice('Copied visible table to clipboard.');
+        return;
+      }
+      showClipboardModal(text, 'Table export');
+      showClientNotice('Clipboard write was blocked. Manual copy dialog opened.', true);
+    } catch (error) {
+      showClientNotice(error.message || 'Failed to copy table to clipboard.', true);
+    }
+  });
+}
+
+for (const button of document.querySelectorAll('[data-export-clipboard]')) {
+  button.addEventListener('click', async () => {
+    try {
+      await fetchClipboardExport(button.dataset.exportClipboard, button.innerText.trim());
+    } catch (error) {
+      showClientNotice(error.message || 'Failed to copy export to clipboard.', true);
+    }
+  });
+}
+
+for (const button of document.querySelectorAll('#clipboard-close, #clipboard-close-2')) {
+  button.addEventListener('click', hideClipboardModal);
+}
+
+document.getElementById('clipboard-copy').addEventListener('click', async () => {
+  if (await copyTextToClipboard(clipboardModalText.value)) {
+    showClientNotice('Copied export content to clipboard.');
+    hideClipboardModal();
+    return;
+  }
+  clipboardModalText.focus();
+  clipboardModalText.select();
+  clipboardModalText.setSelectionRange(0, clipboardModalText.value.length);
+  showClientNotice('Automatic copy is still blocked. Use Ctrl+C in the selected text box.', true);
+});
 </script>
 {% endblock %}

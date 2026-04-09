@@ -194,6 +194,10 @@ Save location behavior:
 - repeated exports on the same day keep unique filenames instead of overwriting earlier ones
 - browser download remains available as an explicit alternative from the export dropdown
 - if `exports.lims_root` is not configured, the default export action reports that as a warning instead of silently failing
+- the main table export dropdown also supports clipboard export of:
+  - the currently visible main table
+  - selected export FASTA records
+  - selected 15% IUPAC FASTA records
 
 ## Next Work
 

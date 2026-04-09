@@ -403,6 +403,30 @@ def build_lims_export_content(config: Config, sample_rows: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def load_sample_rows(config: Config, sample_run_ids: list[str]) -> list[dict]:
+    connection = connect(config.database.path)
+    try:
+        sample_rows = []
+        for item in sample_run_ids:
+            sample_row = get_sample(connection, item)
+            if sample_row is not None:
+                sample_rows.append(sample_row)
+    finally:
+        connection.close()
+    return sample_rows
+
+
+def build_fasta_clipboard_content(config: Config, sample_rows: list[dict], output_key: str) -> str:
+    chunks: list[str] = []
+    for sample_row in sample_rows:
+        file_path, _ = resolve_output_file(config, sample_row, output_key)
+        text = file_path.read_text(encoding="utf-8")
+        if text and not text.endswith("\n"):
+            text = f"{text}\n"
+        chunks.append(text)
+    return "".join(chunks)
+
+
 def lims_export_filename(sample_rows: list[dict]) -> str:
     if len(sample_rows) == 1:
         identifier = display_identifier(sample_rows[0]) or sample_rows[0].get("sample_id") or "sample"
@@ -675,15 +699,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if not sample_run_id:
             return RedirectResponse(redirect_to, status_code=303)
 
-        connection = connect(config.database.path)
-        try:
-            sample_rows = []
-            for item in sample_run_id:
-                sample_row = get_sample(connection, item)
-                if sample_row is not None:
-                    sample_rows.append(sample_row)
-        finally:
-            connection.close()
+        sample_rows = load_sample_rows(config, sample_run_id)
 
         if not sample_rows:
             raise HTTPException(status_code=404, detail="No matching samples found")
@@ -713,15 +729,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if not sample_run_id:
             return RedirectResponse(redirect_to, status_code=303)
 
-        connection = connect(config.database.path)
-        try:
-            sample_rows = []
-            for item in sample_run_id:
-                sample_row = get_sample(connection, item)
-                if sample_row is not None:
-                    sample_rows.append(sample_row)
-        finally:
-            connection.close()
+        sample_rows = load_sample_rows(config, sample_run_id)
 
         if not sample_rows:
             raise HTTPException(status_code=404, detail="No matching samples found")
@@ -737,6 +745,30 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             content=content,
             media_type="text/tab-separated-values; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.post("/samples/clipboard/fasta")
+    async def bulk_fasta_clipboard_export(sample_run_id: list[str] = Form(default=[])):
+        if not sample_run_id:
+            raise HTTPException(status_code=400, detail="No samples selected")
+        sample_rows = load_sample_rows(config, sample_run_id)
+        if not sample_rows:
+            raise HTTPException(status_code=404, detail="No matching samples found")
+        return Response(
+            content=build_fasta_clipboard_content(config, sample_rows, "export_fasta"),
+            media_type="text/plain; charset=utf-8",
+        )
+
+    @app.post("/samples/clipboard/iupac-fasta")
+    async def bulk_iupac_fasta_clipboard_export(sample_run_id: list[str] = Form(default=[])):
+        if not sample_run_id:
+            raise HTTPException(status_code=400, detail="No samples selected")
+        sample_rows = load_sample_rows(config, sample_run_id)
+        if not sample_rows:
+            raise HTTPException(status_code=404, detail="No matching samples found")
+        return Response(
+            content=build_fasta_clipboard_content(config, sample_rows, "export_iupac_fasta"),
+            media_type="text/plain; charset=utf-8",
         )
 
     @app.get("/samples/{sample_run_id}", response_class=HTMLResponse)

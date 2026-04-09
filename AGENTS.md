@@ -106,6 +106,11 @@ python -m compileall virtitta
   - avoid overwriting existing files by creating a unique filename
   - browser download is a separate explicit alternative, not the default action
   - show user feedback after export so the operator can see that the write completed
+- The main table export dropdown also supports clipboard-oriented exports:
+  - visible table content
+  - selected export FASTA records
+  - selected 15% IUPAC FASTA records
+  - prefer using the configured `export_*` output paths from imported QC JSON rather than rebuilding FASTA content in the app
 
 ## Planned next larger feature
 

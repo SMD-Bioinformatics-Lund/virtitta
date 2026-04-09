@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from starlette.requests import Request
 
 from virtitta.app import (
+    build_fasta_clipboard_content,
     build_igv_goto_url,
     build_igv_url,
     build_lims_export_content,
@@ -98,6 +99,14 @@ class VirtittaSmokeTests(unittest.TestCase):
         (self.sample_dir / "lid" / "LID001-2limsrs.txt").write_text(
             "sample_id\tparameter_name\tparameter_value\tcomment\n"
             "LID001\thcvtyp\tHCV genotyp 3a\t\n",
+            encoding="utf-8",
+        )
+        (self.sample_dir / "lid" / "LID001.fasta").write_text(
+            ">LID001\nACGT\n",
+            encoding="utf-8",
+        )
+        (self.sample_dir / "lid" / "LID001-0.15-iupac.fasta").write_text(
+            ">LID001-0.15-iupac\nARYT\n",
             encoding="utf-8",
         )
 
@@ -347,6 +356,26 @@ class VirtittaSmokeTests(unittest.TestCase):
             ),
         )
 
+    def test_fasta_clipboard_content_uses_selected_output(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        assert sample is not None
+        self.assertEqual(
+            build_fasta_clipboard_content(config, [sample], "export_fasta"),
+            ">LID001\nACGT\n",
+        )
+        self.assertEqual(
+            build_fasta_clipboard_content(config, [sample], "export_iupac_fasta"),
+            ">LID001-0.15-iupac\nARYT\n",
+        )
+
     def test_lims_export_is_written_to_server_export_root(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
@@ -482,6 +511,26 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('attachment; filename="LID001-2limsrs.txt"', response.headers["content-disposition"])
+
+    def test_bulk_fasta_clipboard_export_returns_text(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/clipboard/fasta")
+        response = asyncio.run(route.endpoint(sample_run_id=["SAMPLE001_fixture_run"]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.body.decode("utf-8"), ">LID001\nACGT\n")
+
+    def test_bulk_iupac_fasta_clipboard_export_returns_text(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/clipboard/iupac-fasta")
+        response = asyncio.run(route.endpoint(sample_run_id=["SAMPLE001_fixture_run"]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.body.decode("utf-8"), ">LID001-0.15-iupac\nARYT\n")
 
     def test_fail_qc_requires_comment(self) -> None:
         config = load_config(self.config_path)
