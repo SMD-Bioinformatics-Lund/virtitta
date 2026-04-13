@@ -356,7 +356,7 @@ def windows_path_to_igv_path(path_str: str) -> str:
 
 
 def lims_qc_value(qc_status: str | None) -> str:
-    return "passed" if qc_status == "pass" else "failed"
+    return "Passed" if qc_status == "pass" else "Failed"
 
 
 def normalize_lims_row(line: str) -> str:
