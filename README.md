@@ -18,9 +18,9 @@ The interface is designed for efficient day-to-day review rather than presentati
 
 Virtitta does not scrape raw pipeline outputs directly. It imports the structured run summaries produced by `virpipa`:
 
-- `results/<run_name>/pipeline_info/qc_summary.json`
+- `results/<run_name>/<sample_id>/results/<sample_id>_qc_summary.json`
 
-Each sample record in that JSON includes the QC values shown in the table plus relative paths to important result files.
+Each per-sample JSON includes the QC values shown in the table plus relative paths to important result files.
 
 ## Configuration
 
@@ -102,7 +102,7 @@ PYTHONPATH=$PWD python -m virtitta.cli serve --config virtitta.toml --host 0.0.0
 
 ## Add Samples From A New Run
 
-After a `virpipa` run finishes and contains `pipeline_info/qc_summary.json`, import it into Virtitta:
+After a `virpipa` run finishes and contains per-sample `*_qc_summary.json` files under each sample `results/` directory, import it into Virtitta:
 
 ```bash
 PYTHONPATH=$PWD python -m virtitta.cli import-run \

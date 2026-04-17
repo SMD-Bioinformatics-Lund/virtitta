@@ -67,16 +67,35 @@ def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpa
     }
 
 
+def _sample_qc_summary_paths(run_dir: Path) -> list[Path]:
+    paths: list[Path] = []
+    for sample_dir in sorted(path for path in run_dir.iterdir() if path.is_dir()):
+        results_dir = sample_dir / "results"
+        if not results_dir.is_dir():
+            continue
+        qc_summary_path = results_dir / f"{sample_dir.name}_qc_summary.json"
+        if qc_summary_path.is_file():
+            paths.append(qc_summary_path)
+    return paths
+
+
+def _load_sample_summary(qc_summary_path: Path) -> dict:
+    payload = json.loads(qc_summary_path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, list) and len(payload) == 1 and isinstance(payload[0], dict):
+        return payload[0]
+    raise ValueError(f"Expected a JSON object in {qc_summary_path}")
+
+
 def import_run(config: Config, run_dir: Path) -> int:
     run_dir = run_dir.resolve()
-    qc_summary_path = run_dir / "pipeline_info" / "qc_summary.json"
-    if not qc_summary_path.exists():
-        raise FileNotFoundError(f"Missing run summary file: {qc_summary_path}")
+    qc_summary_paths = _sample_qc_summary_paths(run_dir)
+    if not qc_summary_paths:
+        raise FileNotFoundError(f"Missing per-sample QC summary files under: {run_dir}")
 
     root, run_relpath = _find_matching_root(run_dir, config.results_roots)
-    records = json.loads(qc_summary_path.read_text(encoding="utf-8"))
-    if not isinstance(records, list):
-        raise ValueError(f"Expected a JSON array in {qc_summary_path}")
+    records = [(_load_sample_summary(path), path) for path in qc_summary_paths]
 
     connection = connect(config.database.path)
     try:
@@ -84,11 +103,11 @@ def import_run(config: Config, run_dir: Path) -> int:
         if not records:
             return 0
 
-        first = records[0]
+        first, _ = records[0]
         upsert_run(
             connection,
             {
-                "run_name": first["run_name"],
+                "run_name": first.get("run_name") or run_dir.name,
                 "sample_count": len(records),
                 "pipeline_name": first.get("pipeline_name"),
                 "virus": first.get("virus"),
@@ -99,8 +118,9 @@ def import_run(config: Config, run_dir: Path) -> int:
         )
 
         imported = 0
-        for sample in records:
-            sample_results_relpath = run_relpath / sample["sample_id"] / "results"
+        root_path = root.linux_path.resolve()
+        for sample, qc_summary_path in records:
+            sample_results_relpath = qc_summary_path.parent.resolve().relative_to(root_path)
             upsert_sample(
                 connection,
                 _flatten_sample_record(
@@ -123,7 +143,6 @@ def import_all_roots(config: Config) -> int:
         if not root.linux_path.exists():
             continue
         for run_dir in sorted(path for path in root.linux_path.iterdir() if path.is_dir()):
-            qc_summary_path = run_dir / "pipeline_info" / "qc_summary.json"
-            if qc_summary_path.exists():
+            if _sample_qc_summary_paths(run_dir):
                 total += import_run(config, run_dir)
     return total

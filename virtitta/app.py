@@ -1077,7 +1077,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return RedirectResponse(
             append_notice(
                 request_url_without_messages(redirect_to),
-                f"Refreshed run metadata from qc_summary.json ({imported} samples).",
+                f"Refreshed run metadata from per-sample QC summaries ({imported} samples).",
             ),
             status_code=303,
         )

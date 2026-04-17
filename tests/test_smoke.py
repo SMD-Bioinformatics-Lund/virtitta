@@ -80,21 +80,29 @@ def write_test_config(config_path: Path, *, root: Path, db_path: Path) -> None:
 
 
 class VirtittaSmokeTests(unittest.TestCase):
+    def write_sample_summary(self, sample: dict) -> None:
+        sample_id = sample["sample_id"]
+        summary_path = self.run_dir / sample_id / "results" / f"{sample_id}_qc_summary.json"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(json.dumps(sample), encoding="utf-8")
+
+    def write_run_summaries(self, samples: list[dict]) -> None:
+        for summary_path in self.run_dir.glob("*/results/*_qc_summary.json"):
+            summary_path.unlink()
+        for sample in samples:
+            self.write_sample_summary(sample)
+
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.tmp_path = Path(self.temp_dir.name)
         self.root = self.tmp_path / "results_root"
         self.run_dir = self.root / "fixture_run"
         self.sample_dir = self.run_dir / "SAMPLE001" / "results"
-        (self.run_dir / "pipeline_info").mkdir(parents=True)
         self.sample_dir.mkdir(parents=True)
 
         fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         fixture[0]["generated_at_utc"] = "2026-04-08T09:12:34Z"
-        (self.run_dir / "pipeline_info" / "qc_summary.json").write_text(
-            json.dumps(fixture),
-            encoding="utf-8",
-        )
+        self.write_run_summaries([fixture[0]])
 
         for filename in [
             "SAMPLE001_rug_kde_plot.png",
@@ -310,10 +318,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         fixture[0]["outputs"]["selected_vadr_gff"] = "SAMPLE001.vadr.fail_mod.gff"
         fixture[0]["outputs"]["vadr_fail_gff"] = "SAMPLE001.vadr.fail_mod.gff"
         fixture[0]["outputs"]["vadr_gff"] = "SAMPLE001.vadr.fail_mod.gff"
-        (self.run_dir / "pipeline_info" / "qc_summary.json").write_text(
-            json.dumps(fixture),
-            encoding="utf-8",
-        )
+        self.write_run_summaries([fixture[0]])
 
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
@@ -329,10 +334,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("SAMPLE001.vadr.fail_mod.gff", stale_igv_url)
 
         refreshed_fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-        (self.run_dir / "pipeline_info" / "qc_summary.json").write_text(
-            json.dumps(refreshed_fixture),
-            encoding="utf-8",
-        )
+        self.write_run_summaries([refreshed_fixture[0]])
         import_run(config, self.run_dir)
 
         conn = connect(config.database.path)
@@ -381,12 +383,9 @@ class VirtittaSmokeTests(unittest.TestCase):
         for key, value in list(extra["outputs"].items()):
             if isinstance(value, str):
                 extra["outputs"][key] = value.replace("SAMPLE001", "SAMPLE002").replace("LID001", "LID002")
-        (self.run_dir / "pipeline_info" / "qc_summary.json").write_text(
-            json.dumps([fixture[0], extra]),
-            encoding="utf-8",
-        )
+        self.write_run_summaries([fixture[0], extra])
         sample2_dir = self.run_dir / "SAMPLE002" / "results"
-        sample2_dir.mkdir(parents=True)
+        sample2_dir.mkdir(parents=True, exist_ok=True)
         for filename in [
             "SAMPLE002_rug_kde_plot.png",
             "SAMPLE002.fasta",
@@ -541,10 +540,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         clear["resistance"]["mutation_count"] = 0
         clear["resistance"]["by_drug"] = []
         clear["resistance"]["mutations"] = []
-        (self.run_dir / "pipeline_info" / "qc_summary.json").write_text(
-            json.dumps([resistant, clear]),
-            encoding="utf-8",
-        )
+        self.write_run_summaries([resistant, clear])
 
         config = load_config(self.config_path)
         import_run(config, self.run_dir)

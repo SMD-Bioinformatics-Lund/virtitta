@@ -80,7 +80,7 @@ python -m compileall virtitta
 
 ## Current behavior to preserve
 
-- Import from `virpipa` `pipeline_info/qc_summary.json`.
+- Import from per-sample `virpipa` `results/<run>/<sample>/results/<sample>_qc_summary.json`.
 - Preserve Virtitta-owned review state across re-import.
 - Main table currently supports:
   - dense filtering and sorting
