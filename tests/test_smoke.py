@@ -162,6 +162,8 @@ class VirtittaSmokeTests(unittest.TestCase):
         config = load_config(self.config_path)
         self.assertEqual(config.annotations.sample_categories, ["production", "validation", "EQA"])
         self.assertIn("sample_category", config.ui.visible_columns)
+        self.assertIn("manual_groups", config.ui.visible_columns)
+        self.assertNotIn("qc_coverage_1000x_pct", config.ui.visible_columns)
 
     def test_index_route_returns_template_response(self) -> None:
         config = load_config(self.config_path)
@@ -292,7 +294,14 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("Categories", rendered)
         self.assertIn("Groups", rendered)
         self.assertIn('data-col="manual_groups"', rendered)
-        self.assertNotIn('data-col="manual_groups" checked', rendered)
+        self.assertIn('data-col="manual_groups" checked', rendered)
+        self.assertIn('data-col="qc_coverage_1000x_pct"', rendered)
+        self.assertNotIn('data-col="qc_coverage_1000x_pct" checked', rendered)
+        self.assertIn(">Cat<", rendered)
+        self.assertIn(">QC<", rendered)
+        self.assertIn(">Cov %<", rendered)
+        self.assertIn(">Depth<", rendered)
+        self.assertIn(">Frag bp<", rendered)
         self.assertIn("Apply category", rendered)
         self.assertIn("Add group", rendered)
 

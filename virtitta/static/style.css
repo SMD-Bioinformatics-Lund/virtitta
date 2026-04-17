@@ -435,9 +435,10 @@ button.secondary,
 .detail-table td {
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  padding: 4px 6px;
+  padding: 3px 6px;
   vertical-align: top;
   white-space: nowrap;
+  line-height: 1.12;
 }
 
 .dense-table th:first-child,
@@ -495,11 +496,30 @@ button.secondary,
   max-width: 120px;
 }
 
-.sticky-qc-status {
+.sticky-date {
   left: 290px;
-  width: 96px;
-  min-width: 96px;
-  max-width: 96px;
+  width: 88px;
+  min-width: 88px;
+  max-width: 88px;
+}
+
+.sticky-category {
+  left: 379px;
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  text-align: center;
+}
+
+.sticky-qc-status {
+  left: 424px;
+  width: 76px;
+  min-width: 76px;
+  max-width: 76px;
+}
+
+.col-sample_category {
+  text-align: center;
 }
 
 .detail-table th {

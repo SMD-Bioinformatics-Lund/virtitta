@@ -158,11 +158,15 @@
             {% set is_active_sort = (column == sort) %}
             {% set next_desc = false if is_active_sort and desc else true %}
             {% set sticky_class = '' %}
-            {% if loop.index == 1 %}
+            {% if column == 'lid' %}
               {% set sticky_class = 'sticky-col sticky-sample-id' %}
-            {% elif loop.index == 2 %}
+            {% elif column == 'sample_id' %}
               {% set sticky_class = 'sticky-col sticky-lid' %}
-            {% elif loop.index == 3 %}
+            {% elif column == 'generated_date' %}
+              {% set sticky_class = 'sticky-col sticky-date' %}
+            {% elif column == 'sample_category' %}
+              {% set sticky_class = 'sticky-col sticky-category' %}
+            {% elif column == 'qc_status' %}
               {% set sticky_class = 'sticky-col sticky-qc-status' %}
             {% endif %}
             <th class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %}">
@@ -195,16 +199,24 @@
             {% for column in table_columns %}
             {% set value = row[column] %}
             {% set sticky_class = '' %}
-            {% if loop.index == 1 %}
+            {% if column == 'lid' %}
               {% set sticky_class = 'sticky-col sticky-sample-id' %}
-            {% elif loop.index == 2 %}
+            {% elif column == 'sample_id' %}
               {% set sticky_class = 'sticky-col sticky-lid' %}
-            {% elif loop.index == 3 %}
+            {% elif column == 'generated_date' %}
+              {% set sticky_class = 'sticky-col sticky-date' %}
+            {% elif column == 'sample_category' %}
+              {% set sticky_class = 'sticky-col sticky-category' %}
+            {% elif column == 'qc_status' %}
               {% set sticky_class = 'sticky-col sticky-qc-status' %}
             {% endif %}
             <td class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}"{% if column == 'host_filter_reads_removed_proportion' %} style="{{ cell_style(column, value) }}"{% endif %}{% if column == 'resistance_summary' %} data-export-value="{{ row['resistance_summary_tooltip'].replace('\n', ', ') }}"{% endif %}>
               {% if column == 'lid' %}
               <a href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}">{{ display_identifier(row) }}</a>
+              {% elif column == 'sample_category' %}
+              {% if value %}
+              <span title="{{ value }}">{{ value[:3] if value == value.upper() else value[:3]|capitalize }}</span>
+              {% endif %}
               {% elif column == 'resistance_summary' %}
               <div class="resistance-summary-cell" title="{{ row['resistance_summary_tooltip'] }}">
                 <div class="resistance-strip resistance-strip-compact">
