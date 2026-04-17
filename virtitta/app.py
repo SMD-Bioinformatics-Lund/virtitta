@@ -10,9 +10,10 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from virtitta.config import DEFAULT_COLUMN_LABELS, QC_STATUS_OPTIONS, Config, load_config
+from virtitta.config import DEFAULT_COLUMN_LABELS, OPTIONAL_TABLE_COLUMNS, QC_STATUS_OPTIONS, Config, load_config
 from virtitta.repository import (
     add_comment,
+    add_samples_to_group,
     connect,
     delete_comment,
     delete_samples,
@@ -20,10 +21,14 @@ from virtitta.repository import (
     get_run,
     get_sample,
     init_db,
+    list_manual_groups,
     list_runs,
+    list_stored_sample_categories,
     list_subtypes,
     list_samples,
     raw_json_for_sample,
+    remove_samples_from_group,
+    set_sample_category,
     update_qc_status,
 )
 
@@ -82,6 +87,8 @@ HCV_RESISTANCE_DRUGS = [
     ("Sofosbuvir", "SOF"),
 ]
 
+CATEGORY_UNASSIGNED = "__unassigned__"
+
 
 def format_value(value: object, column: str | None = None) -> str:
     if value is None:
@@ -119,8 +126,61 @@ def parse_optional_float(value: str | None) -> float | None:
     return float(stripped)
 
 
+def unique_strings(values: object) -> list[str]:
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value).strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        normalized.append(item)
+    return normalized
+
+
+def table_columns(config: Config) -> list[str]:
+    columns = list(config.ui.visible_columns)
+    for column in OPTIONAL_TABLE_COLUMNS:
+        if column not in columns:
+            columns.append(column)
+    return columns
+
+
+def configured_category_options(config: Config, stored_categories: list[str], selected_categories: list[str]) -> list[str]:
+    options = list(config.annotations.sample_categories)
+    for category in list(stored_categories) + list(selected_categories):
+        if category == CATEGORY_UNASSIGNED or category in options:
+            continue
+        options.append(category)
+    return options
+
+
 def bool_query_value(value: bool) -> str:
     return "true" if value else "false"
+
+
+def replace_query_params(url: str, **updates: object) -> str:
+    parts = urlsplit(url)
+    query_items = parse_qsl(parts.query, keep_blank_values=True)
+    replaced_keys = set(updates)
+    query_items = [(key, value) for key, value in query_items if key not in replaced_keys]
+
+    for key, value in updates.items():
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                item_text = str(item).strip()
+                if item_text:
+                    query_items.append((key, item_text))
+            continue
+        if value is None:
+            continue
+        value_text = str(value).strip()
+        if value_text:
+            query_items.append((key, value_text))
+
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
 
 
 def cell_class(config: Config, column: str, value: object) -> str:
@@ -570,6 +630,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         run_name: str = Query(default=""),
         subtype: str = Query(default=""),
         qc_status: str = Query(default=""),
+        sample_category: list[str] | None = Query(default=None),
+        manual_group: list[str] | None = Query(default=None),
         warning: str = Query(default=""),
         notice: str = Query(default=""),
         min_coverage_pct: str = Query(default=""),
@@ -579,10 +641,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         sort: str = Query(default=config.ui.default_sort),
         desc: bool = Query(default=config.ui.default_sort_desc),
     ):
+        selected_sample_categories = unique_strings(sample_category)
+        selected_manual_groups = unique_strings(manual_group)
         min_coverage_value = parse_optional_float(min_coverage_pct)
         min_mean_depth_value = parse_optional_float(min_mean_depth)
         min_blast_identity_value = parse_optional_float(min_blast_identity)
         max_ct_value = parse_optional_float(max_ct)
+        all_columns = table_columns(config)
+        visible_column_set = set(config.ui.visible_columns)
 
         connection = connect(config.database.path)
         try:
@@ -592,6 +658,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 run_name=run_name,
                 subtype=subtype,
                 qc_status=qc_status,
+                sample_categories=selected_sample_categories,
+                manual_groups=selected_manual_groups,
                 min_coverage_pct=min_coverage_value,
                 min_mean_depth=min_mean_depth_value,
                 min_blast_identity=min_blast_identity_value,
@@ -601,8 +669,16 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             )
             runs = list_runs(connection)
             subtypes = list_subtypes(connection)
+            stored_sample_categories = list_stored_sample_categories(connection)
+            available_manual_groups = list_manual_groups(connection)
         finally:
             connection.close()
+
+        available_sample_categories = configured_category_options(
+            config,
+            stored_sample_categories,
+            selected_sample_categories,
+        )
 
         for row in rows:
             raw = raw_json_for_sample(row)
@@ -626,7 +702,9 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "rows": rows,
                 "runs": runs,
                 "subtypes": subtypes,
+                "table_columns": all_columns,
                 "visible_columns": config.ui.visible_columns,
+                "visible_column_set": visible_column_set,
                 "column_labels": {**DEFAULT_COLUMN_LABELS, **config.ui.column_labels},
                 "cell_class": lambda column, value: cell_class(config, column, value),
                 "cell_display_class": cell_display_class,
@@ -636,12 +714,18 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "format_value": format_value,
                 "display_identifier": display_identifier,
                 "bool_query_value": bool_query_value,
+                "index_query_url": lambda **updates: replace_query_params(str(request.url), **updates),
                 "sort": sort,
                 "desc": desc,
                 "search": search,
                 "selected_run_name": run_name,
                 "selected_subtype": subtype,
                 "selected_qc_status": qc_status,
+                "selected_sample_categories": selected_sample_categories,
+                "selected_manual_groups": selected_manual_groups,
+                "available_sample_categories": available_sample_categories,
+                "available_manual_groups": available_manual_groups,
+                "category_unassigned_value": CATEGORY_UNASSIGNED,
                 "min_coverage_pct": min_coverage_pct,
                 "min_mean_depth": min_mean_depth,
                 "min_blast_identity": min_blast_identity,
@@ -656,6 +740,89 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                     "unreviewed": sum(1 for row in rows if row.get("qc_status") == "unreviewed"),
                 },
             },
+        )
+
+    @app.post("/samples/category")
+    async def bulk_category_update(
+        sample_run_id: list[str] = Form(default=[]),
+        sample_category: str = Form(default=""),
+        redirect_to: str = Form(default="/"),
+    ):
+        if not sample_run_id:
+            return RedirectResponse(redirect_to, status_code=303)
+
+        normalized = sample_category.strip()
+        if normalized and normalized not in config.annotations.sample_categories:
+            raise HTTPException(status_code=400, detail=f"Invalid sample category: {normalized}")
+
+        connection = connect(config.database.path)
+        try:
+            set_sample_category(connection, sample_run_id, normalized or None)
+        finally:
+            connection.close()
+
+        if normalized:
+            return RedirectResponse(
+                append_notice(redirect_to, f"Assigned category '{normalized}' to {len(sample_run_id)} sample(s)."),
+                status_code=303,
+            )
+        return RedirectResponse(
+            append_notice(redirect_to, f"Cleared category for {len(sample_run_id)} sample(s)."),
+            status_code=303,
+        )
+
+    @app.post("/samples/groups/add")
+    async def bulk_add_group(
+        sample_run_id: list[str] = Form(default=[]),
+        group_name: str = Form(default=""),
+        redirect_to: str = Form(default="/"),
+    ):
+        if not sample_run_id:
+            return RedirectResponse(redirect_to, status_code=303)
+
+        normalized = group_name.strip()
+        if not normalized:
+            return RedirectResponse(
+                append_warning(redirect_to, "A group name is required."),
+                status_code=303,
+            )
+
+        connection = connect(config.database.path)
+        try:
+            add_samples_to_group(connection, sample_run_id, normalized)
+        finally:
+            connection.close()
+
+        return RedirectResponse(
+            append_notice(redirect_to, f"Added group '{normalized}' to {len(sample_run_id)} sample(s)."),
+            status_code=303,
+        )
+
+    @app.post("/samples/groups/remove")
+    async def bulk_remove_group(
+        sample_run_id: list[str] = Form(default=[]),
+        group_name: str = Form(default=""),
+        redirect_to: str = Form(default="/"),
+    ):
+        if not sample_run_id:
+            return RedirectResponse(redirect_to, status_code=303)
+
+        normalized = group_name.strip()
+        if not normalized:
+            return RedirectResponse(
+                append_warning(redirect_to, "A group name is required."),
+                status_code=303,
+            )
+
+        connection = connect(config.database.path)
+        try:
+            remove_samples_from_group(connection, sample_run_id, normalized)
+        finally:
+            connection.close()
+
+        return RedirectResponse(
+            append_notice(redirect_to, f"Removed group '{normalized}' from {len(sample_run_id)} sample(s)."),
+            status_code=303,
         )
 
     @app.post("/samples/qc")
@@ -830,6 +997,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "warning_message": warning,
                 "notice_message": notice,
                 "qc_status_options": QC_STATUS_OPTIONS,
+                "sample_categories": config.annotations.sample_categories,
                 "refresh_run_name": sample_row["run_name"],
                 "detail_links": output_links(outputs, DETAIL_FILE_LINKS),
                 "igv_track_links": output_links(outputs, IGV_TRACK_LINKS),

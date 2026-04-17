@@ -24,7 +24,20 @@ from virtitta.app import (
 )
 from virtitta.config import load_config
 from virtitta.importer import import_run
-from virtitta.repository import add_comment, connect, get_comments, get_sample, list_runs, list_samples, update_qc_status
+from virtitta.repository import (
+    add_comment,
+    add_samples_to_group,
+    connect,
+    get_comments,
+    get_sample,
+    list_manual_groups,
+    list_runs,
+    list_samples,
+    list_stored_sample_categories,
+    remove_samples_from_group,
+    set_sample_category,
+    update_qc_status,
+)
 
 
 FIXTURE_PATH = Path("/home/jonas/git/virpipa/assets/test_data/qc_summary/qc_summary.json")
@@ -51,6 +64,9 @@ def write_test_config(config_path: Path, *, root: Path, db_path: Path) -> None:
                 "comments = true",
                 "bulk_qc = true",
                 "igv = true",
+                "",
+                "[annotations]",
+                'sample_categories = ["production", "validation", "EQA"]',
                 "",
                 "[[results_roots]]",
                 'name = "test"',
@@ -134,6 +150,11 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(run, ("fixture_run", 1))
         self.assertEqual(sample, ("SAMPLE001_fixture_run", "fixture_run/SAMPLE001/results", "2026-04-08"))
 
+    def test_load_config_reads_annotation_categories_and_default_category_column(self) -> None:
+        config = load_config(self.config_path)
+        self.assertEqual(config.annotations.sample_categories, ["production", "validation", "EQA"])
+        self.assertIn("sample_category", config.ui.visible_columns)
+
     def test_index_route_returns_template_response(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
@@ -215,6 +236,57 @@ class VirtittaSmokeTests(unittest.TestCase):
         rendered = response.body.decode("utf-8")
         self.assertIn('id="select-visible-samples"', rendered)
         self.assertIn('aria-label="Select visible samples"', rendered)
+
+    def test_index_route_renders_annotation_filters_and_optional_groups_column_toggle(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            set_sample_category(conn, ["SAMPLE001_fixture_run"], "production")
+            add_samples_to_group(conn, ["SAMPLE001_fixture_run"], "cluster-A")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": "/",
+                "raw_path": b"/",
+                "query_string": b"",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "app": app,
+                "router": app.router,
+            }
+        )
+
+        response = route.endpoint(
+            request,
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        )
+
+        rendered = response.body.decode("utf-8")
+        self.assertIn("Categories", rendered)
+        self.assertIn("Groups", rendered)
+        self.assertIn('data-col="manual_groups"', rendered)
+        self.assertNotIn('data-col="manual_groups" checked', rendered)
+        self.assertIn("Apply category", rendered)
+        self.assertIn("Add group", rendered)
 
     def test_igv_url_contains_expected_files(self) -> None:
         config = load_config(self.config_path)
@@ -298,6 +370,109 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["sample_run_id"], "SAMPLE001_fixture_run")
+
+    def test_list_samples_supports_category_and_group_filters(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        extra = json.loads(json.dumps(fixture[0]))
+        extra["sample_id"] = "SAMPLE002"
+        extra["sample_run_id"] = "SAMPLE002_fixture_run"
+        extra["lid"] = "LID002"
+        extra["outputs"] = dict(extra["outputs"])
+        for key, value in list(extra["outputs"].items()):
+            if isinstance(value, str):
+                extra["outputs"][key] = value.replace("SAMPLE001", "SAMPLE002").replace("LID001", "LID002")
+        (self.run_dir / "pipeline_info" / "qc_summary.json").write_text(
+            json.dumps([fixture[0], extra]),
+            encoding="utf-8",
+        )
+        sample2_dir = self.run_dir / "SAMPLE002" / "results"
+        sample2_dir.mkdir(parents=True)
+        for filename in [
+            "SAMPLE002_rug_kde_plot.png",
+            "SAMPLE002.fasta",
+            "SAMPLE002.cram",
+            "SAMPLE002-pilon-m0.05.vcf.gz",
+            "SAMPLE002-pilon-m0.1.vcf.gz",
+            "SAMPLE002-pilon-m0.15.vcf.gz",
+            "SAMPLE002-pilon-m0.2.vcf.gz",
+            "SAMPLE002-pilon-m0.3.vcf.gz",
+            "SAMPLE002-pilon-m0.4.vcf.gz",
+            "SAMPLE002.vadr.bed",
+            "SAMPLE002_resistance.gff",
+            "SAMPLE002.vadr.pass_mod.gff",
+        ]:
+            (sample2_dir / filename).write_text("placeholder", encoding="utf-8")
+        (sample2_dir / "lid").mkdir(parents=True)
+        (sample2_dir / "lid" / "LID002-2limsrs.txt").write_text(
+            "sample_id\tparameter_name\tparameter_value\tcomment\n"
+            "LID002\thcvtyp\tHCV genotyp 3a\t\n",
+            encoding="utf-8",
+        )
+        (sample2_dir / "lid" / "LID002.fasta").write_text(">LID002\nACGT\n", encoding="utf-8")
+        (sample2_dir / "lid" / "LID002-0.15-iupac.fasta").write_text(">LID002-0.15-iupac\nARYT\n", encoding="utf-8")
+
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            set_sample_category(conn, ["SAMPLE001_fixture_run"], "production")
+            set_sample_category(conn, ["SAMPLE002_fixture_run"], "validation")
+            add_samples_to_group(conn, ["SAMPLE001_fixture_run"], "outbreak-17")
+            add_samples_to_group(conn, ["SAMPLE001_fixture_run"], "cluster-A")
+            add_samples_to_group(conn, ["SAMPLE002_fixture_run"], "cluster-B")
+
+            production_rows = list_samples(conn, sample_categories=["production"])
+            unassigned_rows = list_samples(conn, sample_categories=["__unassigned__"])
+            grouped_rows = list_samples(conn, manual_groups=["cluster-A", "cluster-B"])
+            sample1 = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertEqual([row["sample_run_id"] for row in production_rows], ["SAMPLE001_fixture_run"])
+        self.assertEqual(unassigned_rows, [])
+        self.assertEqual(
+            {row["sample_run_id"] for row in grouped_rows},
+            {"SAMPLE001_fixture_run", "SAMPLE002_fixture_run"},
+        )
+        self.assertEqual(sample1["sample_category"], "production")
+        self.assertEqual(sample1["manual_groups"], "cluster-A, outbreak-17")
+
+    def test_annotations_survive_reimport(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            set_sample_category(conn, ["SAMPLE001_fixture_run"], "EQA")
+            add_samples_to_group(conn, ["SAMPLE001_fixture_run"], "outbreak-22")
+        finally:
+            conn.close()
+
+        import_run(config, self.run_dir)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertEqual(sample["sample_category"], "EQA")
+        self.assertEqual(sample["manual_groups"], "outbreak-22")
+
+    def test_distinct_category_and_group_lists_include_manual_annotations(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            set_sample_category(conn, ["SAMPLE001_fixture_run"], "production")
+            add_samples_to_group(conn, ["SAMPLE001_fixture_run"], "cluster-A")
+            add_samples_to_group(conn, ["SAMPLE001_fixture_run"], "cluster-A")
+            stored_categories = list_stored_sample_categories(conn)
+            stored_groups = list_manual_groups(conn)
+        finally:
+            conn.close()
+
+        self.assertEqual(stored_categories, ["production"])
+        self.assertEqual(stored_groups, ["cluster-A"])
 
     def test_list_samples_includes_comment_preview(self) -> None:
         config = load_config(self.config_path)
@@ -661,6 +836,115 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(len(comments), 1)
         self.assertEqual(comments[0]["body"], "Coverage too low")
         self.assertEqual(comments[0]["author"], "tester")
+
+    def test_bulk_category_route_assigns_and_clears_category(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/category")
+
+        response = asyncio.run(
+            route.endpoint(
+                sample_run_id=["SAMPLE001_fixture_run"],
+                sample_category="validation",
+                redirect_to="/?run_name=fixture_run",
+            )
+        )
+
+        self.assertEqual(response.status_code, 303)
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+        self.assertEqual(sample["sample_category"], "validation")
+
+        asyncio.run(
+            route.endpoint(
+                sample_run_id=["SAMPLE001_fixture_run"],
+                sample_category="",
+                redirect_to="/?run_name=fixture_run",
+            )
+        )
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+        self.assertIsNone(sample["sample_category"])
+
+    def test_bulk_group_routes_add_and_remove_membership(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        add_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/groups/add")
+        remove_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/groups/remove")
+
+        response = asyncio.run(
+            add_route.endpoint(
+                sample_run_id=["SAMPLE001_fixture_run"],
+                group_name="outbreak-19",
+                redirect_to="/?run_name=fixture_run",
+            )
+        )
+        self.assertEqual(response.status_code, 303)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+        self.assertEqual(sample["manual_groups"], "outbreak-19")
+
+        response = asyncio.run(
+            remove_route.endpoint(
+                sample_run_id=["SAMPLE001_fixture_run"],
+                group_name="outbreak-19",
+                redirect_to="/?run_name=fixture_run",
+            )
+        )
+        self.assertEqual(response.status_code, 303)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+        self.assertIsNone(sample["manual_groups"])
+
+    def test_sample_detail_renders_category_and_groups_read_only(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            set_sample_category(conn, ["SAMPLE001_fixture_run"], "production")
+            add_samples_to_group(conn, ["SAMPLE001_fixture_run"], "cluster-A")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}")
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": "/samples/SAMPLE001_fixture_run",
+                "raw_path": b"/samples/SAMPLE001_fixture_run",
+                "query_string": b"",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "app": app,
+                "router": app.router,
+            }
+        )
+
+        response = route.endpoint(request, "SAMPLE001_fixture_run")
+        rendered = response.body.decode("utf-8")
+        self.assertIn("Category:</strong> production", rendered)
+        self.assertIn("Groups:</strong> cluster-A", rendered)
 
     def test_delete_comment_route_removes_comment(self) -> None:
         config = load_config(self.config_path)

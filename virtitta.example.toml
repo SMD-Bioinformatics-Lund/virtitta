@@ -15,6 +15,9 @@ comments = true
 bulk_qc = true
 igv = true
 
+[annotations]
+sample_categories = ["production", "validation", "EQA"]
+
 [exports]
 lims_root = "data/lims_exports"
 

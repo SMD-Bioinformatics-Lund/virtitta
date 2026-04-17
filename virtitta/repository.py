@@ -28,6 +28,8 @@ SORTABLE_COLUMNS = {
     "sample_metadata_library_concentration_ng_ul": "s.sample_metadata_library_concentration_ng_ul",
     "sample_metadata_library_fragment_length_bp": "s.sample_metadata_library_fragment_length_bp",
     "qc_status": "COALESCE(r.qc_status, 'unreviewed')",
+    "sample_category": "COALESCE(a.sample_category, '')",
+    "manual_groups": "manual_groups",
     "comment_count": "comment_count",
 }
 
@@ -106,6 +108,17 @@ def init_db(connection: sqlite3.Connection) -> None:
             updated_by TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS sample_annotations (
+            sample_run_id TEXT PRIMARY KEY REFERENCES samples(sample_run_id) ON DELETE CASCADE,
+            sample_category TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS sample_group_memberships (
+            sample_run_id TEXT NOT NULL REFERENCES samples(sample_run_id) ON DELETE CASCADE,
+            group_name TEXT NOT NULL,
+            PRIMARY KEY (sample_run_id, group_name)
+        );
+
         CREATE TABLE IF NOT EXISTS sample_comments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             sample_run_id TEXT NOT NULL REFERENCES samples(sample_run_id) ON DELETE CASCADE,
@@ -117,6 +130,8 @@ def init_db(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_samples_run_name ON samples(run_name);
         CREATE INDEX IF NOT EXISTS idx_samples_sample_id ON samples(sample_id);
         CREATE INDEX IF NOT EXISTS idx_samples_lid ON samples(lid);
+        CREATE INDEX IF NOT EXISTS idx_annotations_sample_category ON sample_annotations(sample_category);
+        CREATE INDEX IF NOT EXISTS idx_group_memberships_group_name ON sample_group_memberships(group_name);
         CREATE INDEX IF NOT EXISTS idx_comments_sample_run_id ON sample_comments(sample_run_id);
         """
     )
@@ -223,6 +238,8 @@ def list_samples(
     run_name: str = "",
     subtype: str = "",
     qc_status: str = "",
+    sample_categories: list[str] | None = None,
+    manual_groups: list[str] | None = None,
     min_coverage_pct: float | None = None,
     min_mean_depth: float | None = None,
     min_blast_identity: float | None = None,
@@ -246,6 +263,31 @@ def list_samples(
     if qc_status:
         clauses.append("COALESCE(r.qc_status, 'unreviewed') = ?")
         params.append(qc_status)
+    if sample_categories:
+        configured_categories = [item for item in sample_categories if item not in ("", "__unassigned__")]
+        include_unassigned = "__unassigned__" in sample_categories
+        category_clauses: list[str] = []
+        if configured_categories:
+            placeholders = ",".join("?" for _ in configured_categories)
+            category_clauses.append(f"a.sample_category IN ({placeholders})")
+            params.extend(configured_categories)
+        if include_unassigned:
+            category_clauses.append("a.sample_category IS NULL")
+        if category_clauses:
+            clauses.append("(" + " OR ".join(category_clauses) + ")")
+    if manual_groups:
+        placeholders = ",".join("?" for _ in manual_groups)
+        clauses.append(
+            f"""
+            EXISTS (
+                SELECT 1
+                FROM sample_group_memberships gm_filter
+                WHERE gm_filter.sample_run_id = s.sample_run_id
+                  AND gm_filter.group_name IN ({placeholders})
+            )
+            """.strip()
+        )
+        params.extend(manual_groups)
     if min_coverage_pct is not None:
         clauses.append("s.qc_coverage_pct >= ?")
         params.append(min_coverage_pct)
@@ -270,7 +312,17 @@ def list_samples(
         SELECT
             s.*,
             COALESCE(r.qc_status, 'unreviewed') AS qc_status,
+            a.sample_category AS sample_category,
             r.updated_at AS qc_updated_at,
+            (
+                SELECT GROUP_CONCAT(group_name, ', ')
+                FROM (
+                    SELECT gm.group_name
+                    FROM sample_group_memberships gm
+                    WHERE gm.sample_run_id = s.sample_run_id
+                    ORDER BY gm.group_name ASC
+                )
+            ) AS manual_groups,
             COUNT(c.id) AS comment_count,
             (
                 SELECT GROUP_CONCAT(preview, '\n---\n')
@@ -290,6 +342,7 @@ def list_samples(
             ) AS comment_preview
         FROM samples s
         LEFT JOIN sample_review r ON r.sample_run_id = s.sample_run_id
+        LEFT JOIN sample_annotations a ON a.sample_run_id = s.sample_run_id
         LEFT JOIN sample_comments c ON c.sample_run_id = s.sample_run_id
         {where_sql}
         GROUP BY s.sample_run_id
@@ -304,10 +357,21 @@ def get_sample(connection: sqlite3.Connection, sample_run_id: str) -> dict | Non
         SELECT
             s.*,
             COALESCE(r.qc_status, 'unreviewed') AS qc_status,
+            a.sample_category AS sample_category,
             r.updated_at AS qc_updated_at,
-            r.updated_by AS qc_updated_by
+            r.updated_by AS qc_updated_by,
+            (
+                SELECT GROUP_CONCAT(group_name, ', ')
+                FROM (
+                    SELECT gm.group_name
+                    FROM sample_group_memberships gm
+                    WHERE gm.sample_run_id = s.sample_run_id
+                    ORDER BY gm.group_name ASC
+                )
+            ) AS manual_groups
         FROM samples s
         LEFT JOIN sample_review r ON r.sample_run_id = s.sample_run_id
+        LEFT JOIN sample_annotations a ON a.sample_run_id = s.sample_run_id
         WHERE s.sample_run_id = ?
         """,
         (sample_run_id,),
@@ -342,6 +406,30 @@ def get_comments(connection: sqlite3.Connection, sample_run_id: str) -> list[dic
     ]
 
 
+def list_stored_sample_categories(connection: sqlite3.Connection) -> list[str]:
+    rows = connection.execute(
+        """
+        SELECT DISTINCT sample_category
+        FROM sample_annotations
+        WHERE sample_category IS NOT NULL AND sample_category != ''
+        ORDER BY sample_category ASC
+        """
+    ).fetchall()
+    return [row["sample_category"] for row in rows]
+
+
+def list_manual_groups(connection: sqlite3.Connection) -> list[str]:
+    rows = connection.execute(
+        """
+        SELECT DISTINCT group_name
+        FROM sample_group_memberships
+        WHERE group_name != ''
+        ORDER BY group_name ASC
+        """
+    ).fetchall()
+    return [row["group_name"] for row in rows]
+
+
 def update_qc_status(connection: sqlite3.Connection, sample_run_ids: list[str], status: str, updated_by: str | None = None) -> None:
     now = utc_now()
     for sample_run_id in sample_run_ids:
@@ -355,7 +443,57 @@ def update_qc_status(connection: sqlite3.Connection, sample_run_ids: list[str], 
                 updated_by = excluded.updated_by
             """,
             (sample_run_id, status, now, updated_by),
+    )
+    connection.commit()
+
+
+def set_sample_category(connection: sqlite3.Connection, sample_run_ids: list[str], category: str | None) -> None:
+    normalized = (category or "").strip() or None
+    for sample_run_id in sample_run_ids:
+        if normalized is None:
+            connection.execute(
+                "DELETE FROM sample_annotations WHERE sample_run_id = ?",
+                (sample_run_id,),
+            )
+            continue
+        connection.execute(
+            """
+            INSERT INTO sample_annotations (sample_run_id, sample_category)
+            VALUES (?, ?)
+            ON CONFLICT(sample_run_id) DO UPDATE SET
+                sample_category = excluded.sample_category
+            """,
+            (sample_run_id, normalized),
         )
+    connection.commit()
+
+
+def add_samples_to_group(connection: sqlite3.Connection, sample_run_ids: list[str], group_name: str) -> None:
+    normalized = group_name.strip()
+    for sample_run_id in sample_run_ids:
+        connection.execute(
+            """
+            INSERT INTO sample_group_memberships (sample_run_id, group_name)
+            VALUES (?, ?)
+            ON CONFLICT(sample_run_id, group_name) DO NOTHING
+            """,
+            (sample_run_id, normalized),
+        )
+    connection.commit()
+
+
+def remove_samples_from_group(connection: sqlite3.Connection, sample_run_ids: list[str], group_name: str) -> None:
+    normalized = group_name.strip()
+    if not normalized or not sample_run_ids:
+        return
+    connection.execute(
+        f"""
+        DELETE FROM sample_group_memberships
+        WHERE group_name = ?
+          AND sample_run_id IN ({",".join("?" for _ in sample_run_ids)})
+        """,
+        [normalized, *sample_run_ids],
+    )
     connection.commit()
 
 

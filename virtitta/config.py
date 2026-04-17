@@ -11,6 +11,7 @@ DEFAULT_VISIBLE_COLUMNS = [
     "sample_id",
     "generated_date",
     "qc_status",
+    "sample_category",
     "typing_report_subtype",
     "typing_main_blast_identity",
     "resistance_summary",
@@ -28,11 +29,16 @@ DEFAULT_VISIBLE_COLUMNS = [
     "run_name",
 ]
 
+OPTIONAL_TABLE_COLUMNS = [
+    "manual_groups",
+]
+
 DEFAULT_COLUMN_LABELS = {
     "generated_date": "Date",
     "sample_id": "Sample ID",
     "lid": "LID",
     "qc_status": "QC Status",
+    "sample_category": "Category",
     "typing_report_subtype": "Subtype",
     "typing_main_blast_identity": "BLAST %",
     "resistance_summary": "Resistance",
@@ -48,6 +54,7 @@ DEFAULT_COLUMN_LABELS = {
     "sample_metadata_library_concentration_ng_ul": "Lib Conc",
     "sample_metadata_library_fragment_length_bp": "Fragment BP",
     "run_name": "Run",
+    "manual_groups": "Groups",
     "comment_count": "Comments",
 }
 
@@ -88,6 +95,11 @@ class FeatureSettings:
 
 
 @dataclass(frozen=True)
+class AnnotationSettings:
+    sample_categories: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class ExportSettings:
     lims_root: Path | None = None
 
@@ -115,6 +127,7 @@ class Config:
     database: DatabaseSettings
     igv: IgvSettings
     features: FeatureSettings
+    annotations: AnnotationSettings
     exports: ExportSettings
     ui: UiSettings
     results_roots: list[ResultsRoot]
@@ -141,6 +154,21 @@ def _merge_highlight_rules(user_rules: dict | None) -> dict[str, dict[str, float
     return rules
 
 
+def _normalize_string_list(raw_values: object) -> list[str]:
+    if not isinstance(raw_values, list):
+        return []
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in raw_values:
+        item = str(value).strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        normalized.append(item)
+    return normalized
+
+
 def load_config(config_path: str | Path | None = None) -> Config:
     path = Path(config_path or os.environ.get("VIRTITTA_CONFIG", "virtitta.toml"))
     if not path.exists():
@@ -157,6 +185,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
     db_raw = raw.get("database", {})
     igv_raw = raw.get("igv", {})
     features_raw = raw.get("features", {})
+    annotations_raw = raw.get("annotations", {})
     exports_raw = raw.get("exports", {})
     ui_raw = raw.get("ui", {})
     root_entries = raw.get("results_roots", [])
@@ -192,6 +221,9 @@ def load_config(config_path: str | Path | None = None) -> Config:
             comments=bool(features_raw.get("comments", True)),
             bulk_qc=bool(features_raw.get("bulk_qc", True)),
             igv=bool(features_raw.get("igv", True)),
+        ),
+        annotations=AnnotationSettings(
+            sample_categories=_normalize_string_list(annotations_raw.get("sample_categories", [])),
         ),
         exports=ExportSettings(
             lims_root=(

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="panel">
-  <form method="get" class="filters filter-grid">
+  <form method="get" action="{{ request.url_for('index') }}" class="filters filter-grid">
     <input type="text" name="search" value="{{ search }}" placeholder="Search sample, LID, run">
     <select name="run_name">
       <option value="">All runs</option>
@@ -21,14 +21,43 @@
       <option value="{{ status }}" {% if status == selected_qc_status %}selected{% endif %}>{{ status }}</option>
       {% endfor %}
     </select>
+    <details class="filter-panel">
+      <summary>Categories{% if selected_sample_categories %} ({{ selected_sample_categories|length }}){% endif %}</summary>
+      <div class="filter-checklist">
+        <label class="column-toggle">
+          <input type="checkbox" name="sample_category" value="{{ category_unassigned_value }}" {% if category_unassigned_value in selected_sample_categories %}checked{% endif %}>
+          <span>Unassigned</span>
+        </label>
+        {% for category in available_sample_categories %}
+        <label class="column-toggle">
+          <input type="checkbox" name="sample_category" value="{{ category }}" {% if category in selected_sample_categories %}checked{% endif %}>
+          <span>{{ category }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </details>
+    <details class="filter-panel">
+      <summary>Groups{% if selected_manual_groups %} ({{ selected_manual_groups|length }}){% endif %}</summary>
+      <div class="filter-checklist">
+        {% for group_name in available_manual_groups %}
+        <label class="column-toggle">
+          <input type="checkbox" name="manual_group" value="{{ group_name }}" {% if group_name in selected_manual_groups %}checked{% endif %}>
+          <span>{{ group_name }}</span>
+        </label>
+        {% else %}
+        <div class="muted">No manual groups yet.</div>
+        {% endfor %}
+      </div>
+    </details>
     <input class="input-small" type="number" step="0.01" name="min_coverage_pct" value="{{ min_coverage_pct }}" placeholder="Min cov %">
     <input class="input-small" type="number" step="0.01" name="min_mean_depth" value="{{ min_mean_depth }}" placeholder="Min depth">
     <input class="input-small" type="number" step="0.01" name="min_blast_identity" value="{{ min_blast_identity }}" placeholder="Min BLAST %">
     <input class="input-small" type="number" step="0.01" name="max_ct" value="{{ max_ct }}" placeholder="Max CT">
     <select name="sort">
-      {% for column in visible_columns %}
+      {% for column in table_columns %}
       <option value="{{ column }}" {% if column == sort %}selected{% endif %}>{{ column_labels.get(column, column) }}</option>
       {% endfor %}
+      <option value="comment_count" {% if sort == 'comment_count' %}selected{% endif %}>{{ column_labels.get('comment_count', 'Comments') }}</option>
     </select>
     <label class="checkbox-inline">
       <input type="checkbox" name="desc" value="true" {% if desc %}checked{% endif %}>
@@ -56,9 +85,9 @@
     <details class="column-toggle-panel">
       <summary>Columns</summary>
       <div class="column-toggle-grid">
-        {% for column in visible_columns %}
+        {% for column in table_columns %}
         <label class="column-toggle">
-          <input type="checkbox" class="js-col-toggle" data-col="{{ column }}" checked>
+          <input type="checkbox" class="js-col-toggle" data-col="{{ column }}" {% if column in visible_column_set %}checked{% endif %}>
           <span>{{ column_labels.get(column, column) }}</span>
         </label>
         {% endfor %}
@@ -82,6 +111,16 @@
       <button type="submit" name="qc_status" value="fail">Mark fail</button>
       <button type="submit" name="qc_status" value="unreviewed" class="secondary">Reset QC</button>
       <button type="submit" formaction="{{ request.url_for('bulk_lims_export') }}" formmethod="post" class="secondary">Export LIMS</button>
+      <select name="sample_category">
+        <option value="">Clear category</option>
+        {% for category in available_sample_categories %}
+        <option value="{{ category }}">{{ category }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" formaction="{{ request.url_for('bulk_category_update') }}" formmethod="post" class="secondary">Apply category</button>
+      <input type="text" name="group_name" placeholder="Manual group">
+      <button type="submit" formaction="{{ request.url_for('bulk_add_group') }}" formmethod="post" class="secondary">Add group</button>
+      <button type="submit" formaction="{{ request.url_for('bulk_remove_group') }}" formmethod="post" class="secondary">Remove group</button>
       <details class="action-menu">
         <summary>Export...</summary>
         <div class="action-menu-list">
@@ -115,7 +154,7 @@
                 title="Select visible samples"
               >
             </th>
-            {% for column in visible_columns %}
+            {% for column in table_columns %}
             {% set is_active_sort = (column == sort) %}
             {% set next_desc = false if is_active_sort and desc else true %}
             {% set sticky_class = '' %}
@@ -126,8 +165,8 @@
             {% elif loop.index == 3 %}
               {% set sticky_class = 'sticky-col sticky-qc-status' %}
             {% endif %}
-            <th class="col-{{ column }} {{ sticky_class }}">
-              <a class="sort-link" href="{{ request.url.include_query_params(search=search, run_name=selected_run_name, subtype=selected_subtype, qc_status=selected_qc_status, min_coverage_pct=min_coverage_pct, min_mean_depth=min_mean_depth, min_blast_identity=min_blast_identity, max_ct=max_ct, sort=column, desc=bool_query_value(next_desc)) }}">
+            <th class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %}">
+              <a class="sort-link" href="{{ index_query_url(sort=column, desc=bool_query_value(next_desc)) }}">
                 {{ column_labels.get(column, column) }}
                 {% if is_active_sort %}
                   {% if desc %}▼{% else %}▲{% endif %}
@@ -137,7 +176,7 @@
             {% endfor %}
             <th class="col-comment_count">
               {% set next_desc = false if sort == 'comment_count' and desc else true %}
-              <a class="sort-link" href="{{ request.url.include_query_params(search=search, run_name=selected_run_name, subtype=selected_subtype, qc_status=selected_qc_status, min_coverage_pct=min_coverage_pct, min_mean_depth=min_mean_depth, min_blast_identity=min_blast_identity, max_ct=max_ct, sort='comment_count', desc=bool_query_value(next_desc)) }}">
+              <a class="sort-link" href="{{ index_query_url(sort='comment_count', desc=bool_query_value(next_desc)) }}">
                 {{ column_labels.get('comment_count', 'Comments') }}
                 {% if sort == 'comment_count' %}
                   {% if desc %}▼{% else %}▲{% endif %}
@@ -153,7 +192,7 @@
             <td class="narrow sticky-col sticky-select">
               <input type="checkbox" name="sample_run_id" value="{{ row['sample_run_id'] }}">
             </td>
-            {% for column in visible_columns %}
+            {% for column in table_columns %}
             {% set value = row[column] %}
             {% set sticky_class = '' %}
             {% if loop.index == 1 %}
@@ -163,7 +202,7 @@
             {% elif loop.index == 3 %}
               {% set sticky_class = 'sticky-col sticky-qc-status' %}
             {% endif %}
-            <td class="col-{{ column }} {{ sticky_class }} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}"{% if column == 'host_filter_reads_removed_proportion' %} style="{{ cell_style(column, value) }}"{% endif %}{% if column == 'resistance_summary' %} data-export-value="{{ row['resistance_summary_tooltip'].replace('\n', ', ') }}"{% endif %}>
+            <td class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}"{% if column == 'host_filter_reads_removed_proportion' %} style="{{ cell_style(column, value) }}"{% endif %}{% if column == 'resistance_summary' %} data-export-value="{{ row['resistance_summary_tooltip'].replace('\n', ', ') }}"{% endif %}>
               {% if column == 'lid' %}
               <a href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}">{{ display_identifier(row) }}</a>
               {% elif column == 'resistance_summary' %}
@@ -195,7 +234,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="{{ visible_columns|length + 3 }}" class="empty-state">No samples matched the current filters.</td>
+            <td colspan="{{ table_columns|length + 3 }}" class="empty-state">No samples matched the current filters.</td>
           </tr>
           {% endfor %}
         </tbody>

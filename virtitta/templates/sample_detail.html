@@ -3,7 +3,7 @@
 <section class="panel split-header">
   <div>
     <h2>{{ display_identifier(sample) }}</h2>
-    <div class="meta-line">{{ sample["sample_id"] }} · {{ sample["run_name"] }} · {{ sample["qc_status"] }}</div>
+    <div class="meta-line">{{ sample["sample_id"] }} · {{ sample["run_name"] }} · {{ sample["qc_status"] }}{% if sample["sample_category"] %} · {{ sample["sample_category"] }}{% endif %}</div>
   </div>
   <div class="button-row">
     {% if igv_url %}
@@ -43,6 +43,10 @@
       <textarea name="comment_body" rows="3" placeholder="Required when setting QC to fail. Saved as a comment if provided."></textarea>
       <button type="submit">Save QC</button>
     </form>
+    <div class="annotation-summary">
+      <div><strong>Category:</strong> {{ sample["sample_category"] or "Unassigned" }}</div>
+      <div><strong>Groups:</strong> {{ sample["manual_groups"] or "None" }}</div>
+    </div>
     <div class="meta-line">Last updated: {{ sample["qc_updated_at"] or "never" }}</div>
   </div>
 
@@ -65,6 +69,8 @@
         <tr><th>Sample ID</th><td>{{ sample["sample_id"] }}</td></tr>
         <tr><th>Date</th><td>{{ format_value(sample["generated_date"], "generated_date") }}</td></tr>
         <tr><th>Sample Run ID</th><td>{{ sample["sample_run_id"] }}</td></tr>
+        <tr><th>Category</th><td>{{ sample["sample_category"] or "Unassigned" }}</td></tr>
+        <tr><th>Groups</th><td>{{ sample["manual_groups"] or "None" }}</td></tr>
         <tr><th>Subtype</th><td>{{ format_value(sample["typing_report_subtype"]) }}</td></tr>
         <tr><th>BLAST %</th><td>{{ format_value(sample["typing_main_blast_identity"], "typing_main_blast_identity") }}</td></tr>
         <tr><th>Reads In</th><td>{{ format_value(sample["host_filter_reads_in"], "host_filter_reads_in") }}</td></tr>
