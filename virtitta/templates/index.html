@@ -46,6 +46,12 @@
       <span class="summary-pill summary-unreviewed">Unreviewed {{ summary.unreviewed }}</span>
       <span class="summary-pill summary-pass">Pass {{ summary.pass }}</span>
       <span class="summary-pill summary-fail">Fail {{ summary.fail }}</span>
+      {% if selected_run_name %}
+      <form method="post" action="{{ request.url_for('refresh_run_metadata', run_name=selected_run_name) }}" class="inline-form">
+        <input type="hidden" name="redirect_to" value="{{ request.url }}">
+        <button type="submit" class="compact-button">Refresh run</button>
+      </form>
+      {% endif %}
     </div>
     <details class="column-toggle-panel">
       <summary>Columns</summary>
@@ -101,7 +107,14 @@
       <table class="dense-table">
         <thead>
           <tr>
-            <th class="narrow sticky-col sticky-select"></th>
+            <th class="narrow sticky-col sticky-select">
+              <input
+                type="checkbox"
+                id="select-visible-samples"
+                aria-label="Select visible samples"
+                title="Select visible samples"
+              >
+            </th>
             {% for column in visible_columns %}
             {% set is_active_sort = (column == sort) %}
             {% set next_desc = false if is_active_sort and desc else true %}
@@ -213,6 +226,7 @@ const clientNotice = document.getElementById('client-notice');
 const clipboardModal = document.getElementById('clipboard-modal');
 const clipboardModalTitle = document.getElementById('clipboard-modal-title');
 const clipboardModalText = document.getElementById('clipboard-modal-text');
+const selectVisibleCheckbox = document.getElementById('select-visible-samples');
 
 function showClientNotice(message, isError = false) {
   clientNotice.textContent = message;
@@ -236,6 +250,29 @@ function hideClipboardModal() {
 
 function selectedSampleIds() {
   return Array.from(document.querySelectorAll('input[type="checkbox"][name="sample_run_id"]:checked')).map(box => box.value);
+}
+
+function visibleSampleCheckboxes() {
+  return Array.from(document.querySelectorAll('input[type="checkbox"][name="sample_run_id"]'));
+}
+
+function syncSelectVisibleCheckbox() {
+  if (!selectVisibleCheckbox) {
+    return;
+  }
+  const checkboxes = visibleSampleCheckboxes();
+  const selectedCount = checkboxes.filter(box => box.checked).length;
+  const totalCount = checkboxes.length;
+
+  selectVisibleCheckbox.indeterminate = selectedCount > 0 && selectedCount < totalCount;
+  selectVisibleCheckbox.checked = totalCount > 0 && selectedCount === totalCount;
+}
+
+function setVisibleSampleSelection(checked) {
+  for (const box of visibleSampleCheckboxes()) {
+    box.checked = checked;
+  }
+  syncSelectVisibleCheckbox();
 }
 
 async function copyTextToClipboard(text) {
@@ -316,14 +353,24 @@ function tableTextFromVisibleColumns() {
   return rows.join('\n') + '\n';
 }
 
+if (selectVisibleCheckbox) {
+  selectVisibleCheckbox.addEventListener('change', () => {
+    setVisibleSampleSelection(selectVisibleCheckbox.checked);
+  });
+}
+
+for (const checkbox of visibleSampleCheckboxes()) {
+  checkbox.addEventListener('change', syncSelectVisibleCheckbox);
+}
+
 for (const button of document.querySelectorAll('[data-select-all]')) {
   button.addEventListener('click', () => {
-    document.querySelectorAll('input[type="checkbox"][name="sample_run_id"]').forEach(box => { box.checked = true; });
+    setVisibleSampleSelection(true);
   });
 }
 for (const button of document.querySelectorAll('[data-select-none]')) {
   button.addEventListener('click', () => {
-    document.querySelectorAll('input[type="checkbox"][name="sample_run_id"]').forEach(box => { box.checked = false; });
+    setVisibleSampleSelection(false);
   });
 }
 
@@ -378,5 +425,7 @@ document.getElementById('clipboard-copy').addEventListener('click', async () => 
   clipboardModalText.setSelectionRange(0, clipboardModalText.value.length);
   showClientNotice('Automatic copy is still blocked. Use Ctrl+C in the selected text box.', true);
 });
+
+syncSelectVisibleCheckbox();
 </script>
 {% endblock %}

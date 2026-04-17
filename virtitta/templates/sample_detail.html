@@ -9,6 +9,10 @@
     {% if igv_url %}
     <a class="button-link" href="{{ igv_url }}">Launch IGV</a>
     {% endif %}
+    <form method="post" action="{{ request.url_for('refresh_run_metadata', run_name=refresh_run_name) }}" class="inline-form">
+      <input type="hidden" name="redirect_to" value="{{ request.url }}">
+      <button type="submit" class="secondary">Refresh run</button>
+    </form>
     <a class="button-link secondary" href="{{ request.url_for('sample_lims_export', sample_run_id=sample['sample_run_id']) }}">Export LIMS</a>
     <details class="action-menu">
       <summary>Export...</summary>

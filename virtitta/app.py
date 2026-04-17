@@ -17,6 +17,7 @@ from virtitta.repository import (
     delete_comment,
     delete_samples,
     get_comments,
+    get_run,
     get_sample,
     init_db,
     list_runs,
@@ -315,13 +316,25 @@ def build_resistance_mutations(raw_sample: dict, sample_id: str) -> list[dict]:
     return mutations
 
 
-def output_links(raw_sample: dict, link_specs: list[tuple[str, str]]) -> list[dict]:
-    outputs = raw_sample.get("outputs", {})
-    return [
-        {"label": label, "key": key, "filename": outputs.get(key)}
-        for label, key in link_specs
-        if outputs.get(key)
-    ]
+def safe_output_path(sample_dir: Path, relname: str) -> Path:
+    relpath = Path(relname)
+    if relpath.is_absolute() or ".." in relpath.parts:
+        raise HTTPException(status_code=400, detail="Unsafe file path")
+    return sample_dir / relpath
+
+
+def effective_outputs(config: Config, sample_row, raw_sample: dict | None = None) -> dict:
+    raw = raw_sample if raw_sample is not None else raw_json_for_sample(sample_row)
+    return dict(raw.get("outputs", {}))
+
+
+def output_links(outputs: dict, link_specs: list[tuple[str, str]]) -> list[dict]:
+    links: list[dict] = []
+    for label, key in link_specs:
+        relname = outputs.get(key)
+        if relname:
+            links.append({"label": label, "key": key, "filename": relname})
+    return links
 
 
 def resolve_sample_results_dir(config: Config, sample_row) -> Path:
@@ -333,16 +346,13 @@ def resolve_sample_results_dir(config: Config, sample_row) -> Path:
 
 
 def resolve_output_file(config: Config, sample_row, output_key: str) -> tuple[Path, str]:
-    raw = raw_json_for_sample(sample_row)
-    outputs = raw.get("outputs", {})
+    outputs = effective_outputs(config, sample_row)
     relname = outputs.get(output_key)
     if not relname:
         raise HTTPException(status_code=404, detail=f"Output not available: {output_key}")
 
     sample_dir = resolve_sample_results_dir(config, sample_row)
-    candidate = (sample_dir / relname).resolve()
-    if sample_dir not in candidate.parents and candidate != sample_dir:
-        raise HTTPException(status_code=400, detail="Unsafe file path")
+    candidate = safe_output_path(sample_dir, relname)
     if not candidate.exists():
         raise HTTPException(status_code=404, detail=f"Missing file on disk: {candidate}")
     return candidate, relname
@@ -481,12 +491,11 @@ def request_url_without_messages(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
 
 
-def build_igv_url(config: Config, sample_row) -> str:
+def build_igv_url(config: Config, sample_row, outputs: dict | None = None) -> str:
     if not config.features.igv or not config.igv.enabled:
         raise HTTPException(status_code=404, detail="IGV integration is disabled")
 
-    raw = raw_json_for_sample(sample_row)
-    outputs = raw.get("outputs", {})
+    resolved_outputs = outputs if outputs is not None else effective_outputs(config, sample_row)
     root = config.get_root(sample_row["source_root_name"])
     if root is None:
         raise HTTPException(status_code=500, detail="Missing results root mapping")
@@ -495,7 +504,7 @@ def build_igv_url(config: Config, sample_row) -> str:
     sample_windows_root = PureWindowsPath(root.windows_path)
 
     def convert_output(key: str) -> str | None:
-        relname = outputs.get(key)
+        relname = resolved_outputs.get(key)
         if not relname:
             return None
         windows_path = sample_windows_root.joinpath(PureWindowsPath(sample_rel.as_posix())).joinpath(relname)
@@ -545,6 +554,7 @@ def build_igv_goto_url(config: Config, locus: str) -> str:
 
 def create_app(config_path: str | Path | None = None) -> FastAPI:
     config = load_config(config_path)
+    from virtitta.importer import import_run as import_run_dir
     connection = connect(config.database.path)
     init_db(connection)
     connection.close()
@@ -788,10 +798,11 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         finally:
             connection.close()
 
+        outputs = effective_outputs(config, sample_row, raw)
         igv_url = None
         if config.features.igv and config.igv.enabled:
             try:
-                igv_url = build_igv_url(config, sample_row)
+                igv_url = build_igv_url(config, sample_row, outputs)
             except HTTPException:
                 igv_url = None
 
@@ -819,8 +830,9 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "warning_message": warning,
                 "notice_message": notice,
                 "qc_status_options": QC_STATUS_OPTIONS,
-                "detail_links": output_links(raw, DETAIL_FILE_LINKS),
-                "igv_track_links": output_links(raw, IGV_TRACK_LINKS),
+                "refresh_run_name": sample_row["run_name"],
+                "detail_links": output_links(outputs, DETAIL_FILE_LINKS),
+                "igv_track_links": output_links(outputs, IGV_TRACK_LINKS),
             },
         )
 
@@ -876,6 +888,31 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
         file_path, relname = resolve_output_file(config, sample_row, output_key)
         return FileResponse(file_path, filename=relname)
+
+    @app.post("/runs/{run_name}/refresh")
+    async def refresh_run_metadata(run_name: str, redirect_to: str = Form(default="/")):
+        connection = connect(config.database.path)
+        try:
+            run_row = get_run(connection, run_name)
+        finally:
+            connection.close()
+
+        if run_row is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        root = config.get_root(run_row["source_root_name"])
+        if root is None:
+            raise HTTPException(status_code=500, detail=f"Configured results root not found: {run_row['source_root_name']}")
+
+        run_dir = (root.linux_path / run_row["run_relpath"]).resolve()
+        imported = import_run_dir(config, run_dir)
+        return RedirectResponse(
+            append_notice(
+                request_url_without_messages(redirect_to),
+                f"Refreshed run metadata from qc_summary.json ({imported} samples).",
+            ),
+            status_code=303,
+        )
 
     @app.get("/samples/{sample_run_id}/lims-export")
     def sample_lims_export(sample_run_id: str):

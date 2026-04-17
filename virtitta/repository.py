@@ -315,6 +315,18 @@ def get_sample(connection: sqlite3.Connection, sample_run_id: str) -> dict | Non
     return _row_to_dict(row)
 
 
+def get_run(connection: sqlite3.Connection, run_name: str) -> dict | None:
+    row = connection.execute(
+        """
+        SELECT run_name, sample_count, pipeline_name, virus, source_root_name, run_relpath, imported_at
+        FROM runs
+        WHERE run_name = ?
+        """,
+        (run_name,),
+    ).fetchone()
+    return _row_to_dict(row)
+
+
 def get_comments(connection: sqlite3.Connection, sample_run_id: str) -> list[dict]:
     return [
         _row_to_dict(row)

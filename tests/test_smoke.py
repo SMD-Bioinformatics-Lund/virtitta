@@ -175,6 +175,47 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(response.template.name, "index.html")
         self.assertEqual(len(response.context["rows"]), 1)
 
+    def test_index_route_renders_visible_selection_checkbox(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
+
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": "/",
+                "raw_path": b"/",
+                "query_string": b"",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "app": app,
+                "router": app.router,
+            }
+        )
+
+        response = route.endpoint(
+            request,
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        )
+
+        rendered = response.body.decode("utf-8")
+        self.assertIn('id="select-visible-samples"', rendered)
+        self.assertIn('aria-label="Select visible samples"', rendered)
+
     def test_igv_url_contains_expected_files(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
@@ -191,6 +232,47 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("file=%2FQ%3Avirtitta-test%2Ffixture_run%2FSAMPLE001%2Fresults%2FSAMPLE001.cram%2C", igv_url)
         self.assertIn("SAMPLE001_resistance.gff", igv_url)
         self.assertIn("merge=false", igv_url)
+
+    def test_igv_url_updates_after_run_reimport(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["outputs"]["selected_vadr_gff"] = "SAMPLE001.vadr.fail_mod.gff"
+        fixture[0]["outputs"]["vadr_fail_gff"] = "SAMPLE001.vadr.fail_mod.gff"
+        fixture[0]["outputs"]["vadr_gff"] = "SAMPLE001.vadr.fail_mod.gff"
+        (self.run_dir / "pipeline_info" / "qc_summary.json").write_text(
+            json.dumps(fixture),
+            encoding="utf-8",
+        )
+
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            rows = list_samples(conn)
+            sample = get_sample(conn, rows[0]["sample_run_id"])
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        stale_igv_url = build_igv_url(config, sample)
+        self.assertIn("SAMPLE001.vadr.fail_mod.gff", stale_igv_url)
+
+        refreshed_fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        (self.run_dir / "pipeline_info" / "qc_summary.json").write_text(
+            json.dumps(refreshed_fixture),
+            encoding="utf-8",
+        )
+        import_run(config, self.run_dir)
+
+        conn = connect(config.database.path)
+        try:
+            rows = list_samples(conn)
+            sample = get_sample(conn, rows[0]["sample_run_id"])
+        finally:
+            conn.close()
+
+        refreshed_igv_url = build_igv_url(config, sample)
+        self.assertIn("SAMPLE001.vadr.pass_mod.gff", refreshed_igv_url)
+        self.assertNotIn("SAMPLE001.vadr.fail_mod.gff", refreshed_igv_url)
 
     def test_igv_goto_url_contains_mutation_locus(self) -> None:
         config = load_config(self.config_path)
@@ -352,7 +434,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             (
                 "sample_id\tparameter_name\tparameter_value\tcomment\n"
                 "LID001\thcvtyp\tHCV genotyp 3a\t\n"
-                "LID001\thcvqc\tpassed\t\n"
+                "LID001\thcvqc\tPassed\t\n"
             ),
         )
 
@@ -433,7 +515,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         export_root = self.root / "lims_exports"
         exported = list(export_root.glob("*/*.txt"))
         self.assertEqual(len(exported), 1)
-        self.assertIn("LID001\thcvqc\tpassed\t", exported[0].read_text(encoding="utf-8"))
+        self.assertIn("LID001\thcvqc\tPassed\t", exported[0].read_text(encoding="utf-8"))
 
     def test_single_sample_lims_export_download_returns_attachment(self) -> None:
         config = load_config(self.config_path)
