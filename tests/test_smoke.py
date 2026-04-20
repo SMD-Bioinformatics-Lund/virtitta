@@ -244,6 +244,8 @@ class VirtittaSmokeTests(unittest.TestCase):
         )
 
         rendered = response.body.decode("utf-8")
+        self.assertIn('aria-label="Go to sample table"', rendered)
+        self.assertIn('id="table-search-input"', rendered)
         self.assertIn('id="select-visible-samples"', rendered)
         self.assertIn('aria-label="Select visible samples"', rendered)
 
@@ -302,6 +304,9 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn(">Cov %<", rendered)
         self.assertIn(">Depth<", rendered)
         self.assertIn(">Frag bp<", rendered)
+        self.assertIn('id="client-empty-state" hidden', rendered)
+        self.assertIn('data-total-count="1"', rendered)
+        self.assertIn("window.history.replaceState", rendered)
         self.assertIn("Apply category", rendered)
         self.assertIn("Add group", rendered)
 

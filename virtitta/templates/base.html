@@ -10,7 +10,9 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <img class="brand-logo" src="{{ request.url_for('static', path='birdy.svg') }}" alt="Virtitta logo">
+      <a href="{{ request.url_for('index') }}" aria-label="Go to sample table">
+        <img class="brand-logo" src="{{ request.url_for('static', path='birdy.svg') }}" alt="Virtitta logo">
+      </a>
       <div class="titleblock">
         <h1>{{ config.app.title }}</h1>
         <div class="subtitle">VirPipa run review</div>
@@ -22,12 +24,37 @@
   </header>
   <main class="layout">
     {% if warning_message %}
-    <section class="panel warning-banner">{{ warning_message }}</section>
+    <section class="panel warning-banner" data-flash-message>{{ warning_message }}</section>
     {% endif %}
     {% if notice_message %}
-    <section class="panel notice-banner">{{ notice_message }}</section>
+    <section class="panel notice-banner" data-flash-message>{{ notice_message }}</section>
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  <script>
+  const flashMessages = Array.from(document.querySelectorAll('[data-flash-message]'));
+
+  if (flashMessages.length) {
+    const url = new URL(window.location.href);
+    let changed = false;
+
+    for (const param of ['warning', 'notice']) {
+      if (url.searchParams.has(param)) {
+        url.searchParams.delete(param);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      window.history.replaceState({}, '', url.toString());
+    }
+
+    window.setTimeout(() => {
+      for (const message of flashMessages) {
+        message.remove();
+      }
+    }, 4500);
+  }
+  </script>
 </body>
 </html>

@@ -2,7 +2,7 @@
 {% block content %}
 <section class="panel">
   <form method="get" action="{{ request.url_for('index') }}" class="filters filter-grid">
-    <input type="text" name="search" value="{{ search }}" placeholder="Search sample, LID, run">
+    <input type="text" id="table-search-input" name="search" value="{{ search }}" placeholder="Search sample, LID, run" autocomplete="off">
     <select name="run_name">
       <option value="">All runs</option>
       {% for run in runs %}
@@ -139,7 +139,7 @@
       >Delete samples</button>
       <input type="text" name="comment_author" placeholder="Comment author">
       <input type="text" name="comment_body" placeholder="Comment for fail or note on selected samples" class="bulk-comment">
-      <span class="count">{{ rows|length }} samples</span>
+      <span class="count" data-sample-count data-total-count="{{ rows|length }}">{{ rows|length }} samples</span>
     </div>
 
     <div class="table-wrap">
@@ -192,7 +192,7 @@
         </thead>
         <tbody>
           {% for row in rows %}
-          <tr class="{{ row_class(row) }}">
+          <tr class="{{ row_class(row) }} js-sample-row">
             <td class="narrow sticky-col sticky-select">
               <input type="checkbox" name="sample_run_id" value="{{ row['sample_run_id'] }}">
             </td>
@@ -244,6 +244,11 @@
               </div>
             </td>
           </tr>
+          {% if loop.last %}
+          <tr id="client-empty-state" hidden>
+            <td colspan="{{ table_columns|length + 3 }}" class="empty-state">No samples matched the table search.</td>
+          </tr>
+          {% endif %}
           {% else %}
           <tr>
             <td colspan="{{ table_columns|length + 3 }}" class="empty-state">No samples matched the current filters.</td>
@@ -278,6 +283,9 @@ const clipboardModal = document.getElementById('clipboard-modal');
 const clipboardModalTitle = document.getElementById('clipboard-modal-title');
 const clipboardModalText = document.getElementById('clipboard-modal-text');
 const selectVisibleCheckbox = document.getElementById('select-visible-samples');
+const tableSearchInput = document.getElementById('table-search-input');
+const sampleCount = document.querySelector('[data-sample-count]');
+const clientEmptyState = document.getElementById('client-empty-state');
 
 function showClientNotice(message, isError = false) {
   clientNotice.textContent = message;
@@ -303,8 +311,63 @@ function selectedSampleIds() {
   return Array.from(document.querySelectorAll('input[type="checkbox"][name="sample_run_id"]:checked')).map(box => box.value);
 }
 
+function sampleRows() {
+  return Array.from(document.querySelectorAll('.js-sample-row'));
+}
+
 function visibleSampleCheckboxes() {
-  return Array.from(document.querySelectorAll('input[type="checkbox"][name="sample_run_id"]'));
+  return sampleRows()
+    .filter(row => !row.hidden)
+    .map(row => row.querySelector('input[type="checkbox"][name="sample_run_id"]'))
+    .filter(box => box);
+}
+
+function rowSearchText(row) {
+  if (!row.dataset.searchText) {
+    row.dataset.searchText = Array.from(row.querySelectorAll('td'))
+      .filter(cell => !cell.classList.contains('sticky-select') && !cell.classList.contains('col-actions'))
+      .map(cell => (cell.dataset.exportValue !== undefined ? cell.dataset.exportValue : cell.textContent || ''))
+      .join(' ')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  return row.dataset.searchText;
+}
+
+function updateSampleCount() {
+  if (!sampleCount) {
+    return;
+  }
+  const totalCount = Number(sampleCount.dataset.totalCount || 0);
+  const visibleCount = sampleRows().filter(row => !row.hidden).length;
+
+  sampleCount.textContent = visibleCount === totalCount
+    ? `${visibleCount} samples`
+    : `${visibleCount} / ${totalCount} samples`;
+}
+
+function updateClientEmptyState() {
+  if (!clientEmptyState) {
+    return;
+  }
+  clientEmptyState.hidden = sampleRows().some(row => !row.hidden);
+}
+
+function applyTableSearchFilter() {
+  if (!tableSearchInput) {
+    return;
+  }
+
+  const query = tableSearchInput.value.toLowerCase().trim().replace(/\s+/g, ' ');
+  for (const row of sampleRows()) {
+    const matches = !query || rowSearchText(row).includes(query);
+    row.hidden = !matches;
+  }
+
+  updateClientEmptyState();
+  updateSampleCount();
+  syncSelectVisibleCheckbox();
 }
 
 function syncSelectVisibleCheckbox() {
@@ -388,8 +451,8 @@ function tableTextFromVisibleColumns() {
   const headerCells = Array.from(table.querySelectorAll('thead th')).filter(exportable);
   rows.push(headerCells.map(cell => cell.innerText.trim()).join('\t'));
 
-  for (const row of table.querySelectorAll('tbody tr')) {
-    if (row.querySelector('.empty-state')) {
+  for (const row of sampleRows()) {
+    if (row.hidden) {
       continue;
     }
     const cells = Array.from(row.children).filter(exportable);
@@ -402,6 +465,13 @@ function tableTextFromVisibleColumns() {
     }).join('\t'));
   }
   return rows.join('\n') + '\n';
+}
+
+if (tableSearchInput) {
+  tableSearchInput.addEventListener('input', applyTableSearchFilter);
+  applyTableSearchFilter();
+} else {
+  updateSampleCount();
 }
 
 if (selectVisibleCheckbox) {
