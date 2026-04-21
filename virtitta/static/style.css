@@ -556,6 +556,36 @@ button.secondary,
   margin: 0;
 }
 
+.overridden-value {
+  font-style: italic;
+}
+
+.override-editor {
+  margin-top: 10px;
+}
+
+.override-editor summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.override-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.override-grid label {
+  display: grid;
+  gap: 3px;
+  font-size: 0.84rem;
+}
+
+.override-grid button {
+  align-self: end;
+}
+
 .comment-list {
   display: grid;
   gap: 8px;

@@ -29,6 +29,7 @@ from virtitta.repository import (
     raw_json_for_sample,
     remove_samples_from_group,
     set_sample_category,
+    set_sample_field_overrides,
     update_qc_status,
 )
 
@@ -88,6 +89,13 @@ HCV_RESISTANCE_DRUGS = [
 ]
 
 CATEGORY_UNASSIGNED = "__unassigned__"
+SAMPLE_OVERRIDE_LABELS = {
+    "lid": "LID",
+    "sequencing_date": "Date",
+    "sample_metadata_ct": "CT",
+    "sample_metadata_library_concentration_ng_ul": "Lib Conc",
+    "typing_report_subtype": "Subtype",
+}
 
 
 def format_value(value: object, column: str | None = None) -> str:
@@ -124,6 +132,26 @@ def parse_optional_float(value: str | None) -> float | None:
     if not stripped:
         return None
     return float(stripped)
+
+
+def parse_optional_date(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    datetime.strptime(stripped, "%Y-%m-%d")
+    return stripped
+
+
+def override_comment_text(change: dict) -> str:
+    field_name = change["field_name"]
+    label = SAMPLE_OVERRIDE_LABELS.get(field_name, field_name)
+    old_value = format_value(change.get("old_value"), field_name) or "blank"
+    new_value = format_value(change.get("new_value"), field_name) or "blank"
+    if change.get("cleared"):
+        return f"Manual override cleared: {label} now uses imported value {new_value}."
+    return f"Manual override: {label} changed from {old_value} to {new_value}."
 
 
 def unique_strings(values: object) -> list[str]:
@@ -439,6 +467,12 @@ def normalize_lims_row(line: str) -> str:
 def build_lims_export_rows(config: Config, sample_row: dict) -> list[str]:
     raw = raw_json_for_sample(sample_row)
     rows: list[str] = []
+    lid = sample_row.get("lid") or raw.get("lid") or sample_row.get("sample_id") or ""
+    subtype = (
+        sample_row.get("typing_report_subtype")
+        or raw.get("typing", {}).get("report_subtype")
+        or ""
+    )
 
     try:
         lims_file, _ = resolve_output_file(config, sample_row, "lid_2limsrs")
@@ -450,18 +484,16 @@ def build_lims_export_rows(config: Config, sample_row: dict) -> list[str]:
             stripped = line.strip()
             if not stripped or stripped == LIMS_EXPORT_HEADER:
                 continue
-            rows.append(normalize_lims_row(line))
+            parts = normalize_lims_row(line).split("\t")
+            if lid:
+                parts[0] = str(lid)
+            if parts[1] == "hcvtyp" and subtype:
+                parts[2] = f"HCV genotyp {subtype}"
+            rows.append("\t".join(parts))
     else:
-        lid = raw.get("lid") or sample_row.get("lid") or sample_row.get("sample_id") or ""
-        subtype = (
-            raw.get("typing", {}).get("report_subtype")
-            or sample_row.get("typing_report_subtype")
-            or ""
-        )
         if lid and subtype:
             rows.append(normalize_lims_row(f"{lid}\thcvtyp\tHCV genotyp {subtype}\t"))
 
-    lid = raw.get("lid") or sample_row.get("lid") or sample_row.get("sample_id") or ""
     rows.append(normalize_lims_row(f"{lid}\thcvqc\t{lims_qc_value(sample_row.get('qc_status'))}\t"))
     return rows
 
@@ -1003,6 +1035,49 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "igv_track_links": output_links(outputs, IGV_TRACK_LINKS),
             },
         )
+
+    @app.post("/samples/{sample_run_id}/overrides")
+    async def update_sample_overrides(
+        sample_run_id: str,
+        lid: str = Form(default=""),
+        sequencing_date: str = Form(default=""),
+        sample_metadata_ct: str = Form(default=""),
+        sample_metadata_library_concentration_ng_ul: str = Form(default=""),
+        typing_report_subtype: str = Form(default=""),
+    ):
+        try:
+            values = {
+                "lid": lid,
+                "sequencing_date": parse_optional_date(sequencing_date),
+                "sample_metadata_ct": parse_optional_float(sample_metadata_ct),
+                "sample_metadata_library_concentration_ng_ul": parse_optional_float(
+                    sample_metadata_library_concentration_ng_ul
+                ),
+                "typing_report_subtype": typing_report_subtype,
+            }
+        except ValueError:
+            return RedirectResponse(
+                append_warning(f"/samples/{sample_run_id}", "Override values must use valid dates and numbers."),
+                status_code=303,
+            )
+
+        connection = connect(config.database.path)
+        try:
+            sample_row = get_sample(connection, sample_run_id)
+            if sample_row is None:
+                raise HTTPException(status_code=404, detail="Sample not found")
+            changes = set_sample_field_overrides(connection, sample_run_id, values)
+            for change in changes:
+                add_comment(connection, sample_run_id, override_comment_text(change), "Virtitta")
+        finally:
+            connection.close()
+
+        if changes:
+            return RedirectResponse(
+                append_notice(f"/samples/{sample_run_id}", f"Updated {len(changes)} override(s)."),
+                status_code=303,
+            )
+        return RedirectResponse(request_url_without_messages(f"/samples/{sample_run_id}"), status_code=303)
 
     @app.post("/samples/{sample_run_id}/comments")
     async def create_comment(

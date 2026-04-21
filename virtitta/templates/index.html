@@ -212,7 +212,7 @@
             {% endif %}
             <td class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}"{% if column == 'host_filter_reads_removed_proportion' %} style="{{ cell_style(column, value) }}"{% endif %}{% if column == 'resistance_summary' %} data-export-value="{{ row['resistance_summary_tooltip'].replace('\n', ', ') }}"{% endif %}>
               {% if column == 'lid' %}
-              <a href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}">{{ display_identifier(row) }}</a>
+              <a class="{% if row.get('lid_overridden') %}overridden-value{% endif %}" href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}" {% if row.get('lid_overridden') %}title="Imported: {{ format_value(row.get('imported_lid')) }}"{% endif %}>{{ display_identifier(row) }}</a>
               {% elif column == 'sample_category' %}
               {% if value %}
               <span title="{{ value }}">{{ value[:3] if value == value.upper() else value[:3]|capitalize }}</span>
@@ -226,7 +226,7 @@
                 </div>
               </div>
               {% else %}
-              {{ format_value(value, column) }}
+              <span class="{% if row.get(column ~ '_overridden') %}overridden-value{% endif %}" {% if row.get(column ~ '_overridden') %}title="Imported: {{ format_value(row.get('imported_' ~ column), column) }}"{% endif %}>{{ format_value(value, column) }}</span>
               {% endif %}
             </td>
             {% endfor %}

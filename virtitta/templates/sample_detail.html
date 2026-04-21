@@ -65,14 +65,14 @@
     <h3>Imported Summary</h3>
     <table class="detail-table">
       <tbody>
-        <tr><th>LID</th><td>{{ format_value(sample["lid"]) }}</td></tr>
+        <tr><th>LID</th><td><span class="{% if sample['lid_overridden'] %}overridden-value{% endif %}" {% if sample['lid_overridden'] %}title="Imported: {{ format_value(sample['imported_lid']) }}"{% endif %}>{{ format_value(sample["lid"]) }}</span></td></tr>
         <tr><th>Sample ID</th><td>{{ sample["sample_id"] }}</td></tr>
-        <tr><th>Date</th><td>{{ format_value(sample["sequencing_date"], "sequencing_date") }}</td></tr>
+        <tr><th>Date</th><td><span class="{% if sample['sequencing_date_overridden'] %}overridden-value{% endif %}" {% if sample['sequencing_date_overridden'] %}title="Imported: {{ format_value(sample['imported_sequencing_date'], 'sequencing_date') }}"{% endif %}>{{ format_value(sample["sequencing_date"], "sequencing_date") }}</span></td></tr>
         <tr><th>Import Date</th><td>{{ format_value(sample["generated_date"], "generated_date") }}</td></tr>
         <tr><th>Sample Run ID</th><td>{{ sample["sample_run_id"] }}</td></tr>
         <tr><th>Category</th><td>{{ sample["sample_category"] or "Unassigned" }}</td></tr>
         <tr><th>Groups</th><td>{{ sample["manual_groups"] or "None" }}</td></tr>
-        <tr><th>Subtype</th><td>{{ format_value(sample["typing_report_subtype"]) }}</td></tr>
+        <tr><th>Subtype</th><td><span class="{% if sample['typing_report_subtype_overridden'] %}overridden-value{% endif %}" {% if sample['typing_report_subtype_overridden'] %}title="Imported: {{ format_value(sample['imported_typing_report_subtype']) }}"{% endif %}>{{ format_value(sample["typing_report_subtype"]) }}</span></td></tr>
         <tr><th>BLAST %</th><td>{{ format_value(sample["typing_main_blast_identity"], "typing_main_blast_identity") }}</td></tr>
         <tr><th>Reads In</th><td>{{ format_value(sample["host_filter_reads_in"], "host_filter_reads_in") }}</td></tr>
         <tr><th>Human</th><td>{{ format_value(sample["host_filter_reads_removed_proportion"], "host_filter_reads_removed_proportion") }}</td></tr>
@@ -82,11 +82,37 @@
         <tr><th>10x %</th><td>{{ format_value(sample["qc_coverage_10x_pct"]) }}</td></tr>
         <tr><th>100x %</th><td>{{ format_value(sample["qc_coverage_100x_pct"]) }}</td></tr>
         <tr><th>1000x %</th><td>{{ format_value(sample["qc_coverage_1000x_pct"]) }}</td></tr>
-        <tr><th>CT</th><td>{{ format_value(sample["sample_metadata_ct"]) }}</td></tr>
-        <tr><th>Lib Conc</th><td>{{ format_value(sample["sample_metadata_library_concentration_ng_ul"]) }}</td></tr>
+        <tr><th>CT</th><td><span class="{% if sample['sample_metadata_ct_overridden'] %}overridden-value{% endif %}" {% if sample['sample_metadata_ct_overridden'] %}title="Imported: {{ format_value(sample['imported_sample_metadata_ct']) }}"{% endif %}>{{ format_value(sample["sample_metadata_ct"]) }}</span></td></tr>
+        <tr><th>Lib Conc</th><td><span class="{% if sample['sample_metadata_library_concentration_ng_ul_overridden'] %}overridden-value{% endif %}" {% if sample['sample_metadata_library_concentration_ng_ul_overridden'] %}title="Imported: {{ format_value(sample['imported_sample_metadata_library_concentration_ng_ul']) }}"{% endif %}>{{ format_value(sample["sample_metadata_library_concentration_ng_ul"]) }}</span></td></tr>
         <tr><th>Fragment BP</th><td>{{ format_value(sample["sample_metadata_library_fragment_length_bp"]) }}</td></tr>
       </tbody>
     </table>
+    <details class="override-editor">
+      <summary>Edit metadata</summary>
+      <form method="post" action="{{ request.url_for('update_sample_overrides', sample_run_id=sample['sample_run_id']) }}" class="override-grid">
+        <label>
+          LID
+          <input type="text" name="lid" value="{{ sample['lid'] or '' }}">
+        </label>
+        <label>
+          Date
+          <input type="text" name="sequencing_date" value="{{ sample['sequencing_date'] or '' }}" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}">
+        </label>
+        <label>
+          CT
+          <input type="number" step="any" name="sample_metadata_ct" value="{{ sample['sample_metadata_ct'] if sample['sample_metadata_ct'] is not none else '' }}">
+        </label>
+        <label>
+          Lib Conc
+          <input type="number" step="any" name="sample_metadata_library_concentration_ng_ul" value="{{ sample['sample_metadata_library_concentration_ng_ul'] if sample['sample_metadata_library_concentration_ng_ul'] is not none else '' }}">
+        </label>
+        <label>
+          Subtype
+          <input type="text" name="typing_report_subtype" value="{{ sample['typing_report_subtype'] or '' }}">
+        </label>
+        <button type="submit">Save metadata</button>
+      </form>
+    </details>
   </div>
 
   <div class="panel" id="comments">

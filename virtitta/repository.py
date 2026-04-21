@@ -34,6 +34,19 @@ SORTABLE_COLUMNS = {
     "comment_count": "comment_count",
 }
 
+OVERRIDABLE_SAMPLE_FIELDS = {
+    "lid",
+    "sequencing_date",
+    "sample_metadata_ct",
+    "sample_metadata_library_concentration_ng_ul",
+    "typing_report_subtype",
+}
+
+NUMERIC_OVERRIDE_FIELDS = {
+    "sample_metadata_ct",
+    "sample_metadata_library_concentration_ng_ul",
+}
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -93,6 +106,83 @@ def _backfill_sequencing_dates(connection: sqlite3.Connection) -> None:
         )
 
 
+def _coerce_override_value(field_name: str, value: str) -> object:
+    if field_name in NUMERIC_OVERRIDE_FIELDS:
+        return float(value)
+    return value
+
+
+def _normalize_override_value(field_name: str, value: object) -> str | None:
+    if field_name not in OVERRIDABLE_SAMPLE_FIELDS:
+        raise ValueError(f"Unsupported override field: {field_name}")
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if field_name in NUMERIC_OVERRIDE_FIELDS:
+        float(text)
+    return text
+
+
+def _typed_override_equal(field_name: str, left: object, right: object) -> bool:
+    if left in (None, "") and right in (None, ""):
+        return True
+    if left in (None, "") or right in (None, ""):
+        return False
+    if field_name in NUMERIC_OVERRIDE_FIELDS:
+        try:
+            return float(left) == float(right)
+        except (TypeError, ValueError):
+            return False
+    return str(left) == str(right)
+
+
+def _apply_sample_overrides(row: dict | None, overrides: dict[str, str] | None = None) -> dict | None:
+    if row is None:
+        return None
+    overrides = overrides or {}
+    overridden_fields = []
+    for field_name in OVERRIDABLE_SAMPLE_FIELDS:
+        row[f"imported_{field_name}"] = row.get(field_name)
+        is_overridden = field_name in overrides
+        row[f"{field_name}_overridden"] = is_overridden
+        if is_overridden:
+            row[field_name] = _coerce_override_value(field_name, overrides[field_name])
+            overridden_fields.append(field_name)
+    row["overridden_fields"] = overridden_fields
+    return row
+
+
+def get_sample_field_overrides(connection: sqlite3.Connection, sample_run_id: str) -> dict[str, str]:
+    rows = connection.execute(
+        """
+        SELECT field_name, value_text
+        FROM sample_field_overrides
+        WHERE sample_run_id = ?
+        """,
+        (sample_run_id,),
+    ).fetchall()
+    return {row["field_name"]: row["value_text"] for row in rows}
+
+
+def _sample_field_overrides_for_rows(connection: sqlite3.Connection, sample_run_ids: list[str]) -> dict[str, dict[str, str]]:
+    if not sample_run_ids:
+        return {}
+    rows = connection.execute(
+        f"""
+        SELECT sample_run_id, field_name, value_text
+        FROM sample_field_overrides
+        WHERE sample_run_id IN ({",".join("?" for _ in sample_run_ids)})
+        """,
+        sample_run_ids,
+    ).fetchall()
+    overrides: dict[str, dict[str, str]] = {}
+    for row in rows:
+        overrides.setdefault(row["sample_run_id"], {})[row["field_name"]] = row["value_text"]
+    return overrides
+
+
 def init_db(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
@@ -142,6 +232,15 @@ def init_db(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS sample_annotations (
             sample_run_id TEXT PRIMARY KEY REFERENCES samples(sample_run_id) ON DELETE CASCADE,
             sample_category TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS sample_field_overrides (
+            sample_run_id TEXT NOT NULL REFERENCES samples(sample_run_id) ON DELETE CASCADE,
+            field_name TEXT NOT NULL,
+            value_text TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            updated_by TEXT,
+            PRIMARY KEY (sample_run_id, field_name)
         );
 
         CREATE TABLE IF NOT EXISTS sample_group_memberships (
@@ -267,9 +366,13 @@ def list_runs(connection: sqlite3.Connection) -> list[str]:
 def list_subtypes(connection: sqlite3.Connection) -> list[str]:
     rows = connection.execute(
         """
-        SELECT DISTINCT typing_report_subtype
-        FROM samples
-        WHERE typing_report_subtype IS NOT NULL AND typing_report_subtype != ''
+        SELECT DISTINCT COALESCE(o.value_text, s.typing_report_subtype) AS typing_report_subtype
+        FROM samples s
+        LEFT JOIN sample_field_overrides o
+          ON o.sample_run_id = s.sample_run_id
+         AND o.field_name = 'typing_report_subtype'
+        WHERE COALESCE(o.value_text, s.typing_report_subtype) IS NOT NULL
+          AND COALESCE(o.value_text, s.typing_report_subtype) != ''
         ORDER BY typing_report_subtype ASC
         """
     ).fetchall()
@@ -296,14 +399,41 @@ def list_samples(
     params: list[object] = []
 
     if search:
-        clauses.append("(s.sample_id LIKE ? OR COALESCE(s.lid, '') LIKE ? OR s.run_name LIKE ? OR s.raw_json LIKE ?)")
+        clauses.append(
+            """
+            (
+                s.sample_id LIKE ?
+                OR COALESCE(s.lid, '') LIKE ?
+                OR s.run_name LIKE ?
+                OR s.raw_json LIKE ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM sample_field_overrides search_overrides
+                    WHERE search_overrides.sample_run_id = s.sample_run_id
+                      AND search_overrides.value_text LIKE ?
+                )
+            )
+            """.strip()
+        )
         needle = f"%{search}%"
-        params.extend([needle, needle, needle, needle])
+        params.extend([needle, needle, needle, needle, needle])
     if run_name:
         clauses.append("s.run_name = ?")
         params.append(run_name)
     if subtype:
-        clauses.append("s.typing_report_subtype = ?")
+        clauses.append(
+            """
+            COALESCE(
+                (
+                    SELECT value_text
+                    FROM sample_field_overrides subtype_override
+                    WHERE subtype_override.sample_run_id = s.sample_run_id
+                      AND subtype_override.field_name = 'typing_report_subtype'
+                ),
+                s.typing_report_subtype
+            ) = ?
+            """.strip()
+        )
         params.append(subtype)
     if qc_status:
         clauses.append("COALESCE(r.qc_status, 'unreviewed') = ?")
@@ -343,7 +473,21 @@ def list_samples(
         clauses.append("s.typing_main_blast_identity >= ?")
         params.append(min_blast_identity)
     if max_ct is not None:
-        clauses.append("s.sample_metadata_ct <= ?")
+        clauses.append(
+            """
+            CAST(
+                COALESCE(
+                    (
+                        SELECT value_text
+                        FROM sample_field_overrides ct_override
+                        WHERE ct_override.sample_run_id = s.sample_run_id
+                          AND ct_override.field_name = 'sample_metadata_ct'
+                    ),
+                    s.sample_metadata_ct
+                ) AS REAL
+            ) <= ?
+            """.strip()
+        )
         params.append(max_ct)
 
     where_sql = ""
@@ -393,7 +537,21 @@ def list_samples(
         GROUP BY s.sample_run_id
         ORDER BY {sort_expr} {order}, s.sample_run_id ASC
     """
-    return [_row_to_dict(row) for row in connection.execute(query, params).fetchall()]
+    rows = [_row_to_dict(row) for row in connection.execute(query, params).fetchall()]
+    overrides = _sample_field_overrides_for_rows(connection, [row["sample_run_id"] for row in rows])
+    for row in rows:
+        _apply_sample_overrides(row, overrides.get(row["sample_run_id"]))
+
+    if sort in OVERRIDABLE_SAMPLE_FIELDS:
+        rows.sort(
+            key=lambda row: (
+                row.get(sort) in (None, ""),
+                row.get(sort) if row.get(sort) is not None else "",
+                row["sample_run_id"],
+            ),
+            reverse=desc,
+        )
+    return rows
 
 
 def get_sample(connection: sqlite3.Connection, sample_run_id: str) -> dict | None:
@@ -421,7 +579,8 @@ def get_sample(connection: sqlite3.Connection, sample_run_id: str) -> dict | Non
         """,
         (sample_run_id,),
     ).fetchone()
-    return _row_to_dict(row)
+    sample = _row_to_dict(row)
+    return _apply_sample_overrides(sample, get_sample_field_overrides(connection, sample_run_id))
 
 
 def get_run(connection: sqlite3.Connection, run_name: str) -> dict | None:
@@ -511,6 +670,75 @@ def set_sample_category(connection: sqlite3.Connection, sample_run_ids: list[str
             (sample_run_id, normalized),
         )
     connection.commit()
+
+
+def set_sample_field_overrides(
+    connection: sqlite3.Connection,
+    sample_run_id: str,
+    values: dict[str, object],
+    *,
+    updated_by: str | None = None,
+) -> list[dict]:
+    imported_row = connection.execute(
+        "SELECT * FROM samples WHERE sample_run_id = ?",
+        (sample_run_id,),
+    ).fetchone()
+    if imported_row is None:
+        return []
+
+    imported = _row_to_dict(imported_row)
+    current_overrides = get_sample_field_overrides(connection, sample_run_id)
+    current = _apply_sample_overrides(dict(imported), current_overrides)
+    changes = []
+    now = utc_now()
+
+    for field_name, raw_value in values.items():
+        normalized = _normalize_override_value(field_name, raw_value)
+        imported_value = imported.get(field_name)
+        current_value = current.get(field_name) if current is not None else imported_value
+
+        if normalized is None or _typed_override_equal(field_name, normalized, imported_value):
+            if field_name not in current_overrides:
+                continue
+            connection.execute(
+                "DELETE FROM sample_field_overrides WHERE sample_run_id = ? AND field_name = ?",
+                (sample_run_id, field_name),
+            )
+            changes.append(
+                {
+                    "field_name": field_name,
+                    "old_value": current_value,
+                    "new_value": imported_value,
+                    "cleared": True,
+                }
+            )
+            continue
+
+        if field_name in current_overrides and _typed_override_equal(field_name, normalized, current_overrides[field_name]):
+            continue
+
+        connection.execute(
+            """
+            INSERT INTO sample_field_overrides (sample_run_id, field_name, value_text, updated_at, updated_by)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(sample_run_id, field_name) DO UPDATE SET
+                value_text = excluded.value_text,
+                updated_at = excluded.updated_at,
+                updated_by = excluded.updated_by
+            """,
+            (sample_run_id, field_name, normalized, now, updated_by),
+        )
+        changes.append(
+            {
+                "field_name": field_name,
+                "old_value": current_value,
+                "new_value": _coerce_override_value(field_name, normalized),
+                "cleared": False,
+            }
+        )
+
+    connection.commit()
+    return changes
 
 
 def add_samples_to_group(connection: sqlite3.Connection, sample_run_ids: list[str], group_name: str) -> None:

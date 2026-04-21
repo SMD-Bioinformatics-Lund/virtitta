@@ -160,7 +160,7 @@ If `--run-dir` is omitted, Virtitta stores the row under the synthetic `manual_f
 Re-importing the same run is safe:
 
 - sample QC metrics and file references are updated from the new `virpipa` JSON
-- Virtitta-owned review state such as comments and QC decisions is preserved
+- Virtitta-owned review state such as comments, QC decisions, and manual field overrides is preserved
 
 If you want to import every run under the configured roots:
 
@@ -212,6 +212,7 @@ Each sample detail page shows:
 - imported summary values
 - current QC status
 - comments
+- compact manual overrides for LID, Date, CT, library concentration, and subtype
 - rug KDE plot
 - result-file download links
 - IGV track-file links
@@ -223,6 +224,13 @@ Each sample detail page shows:
 - failing a sample requires a comment
 - QC comments can be added during the QC action itself
 - comments can be deleted
+
+### Manual Field Overrides
+
+Imported pipeline values remain stored unchanged. On a sample detail page, `Edit metadata` can set narrow
+manual overrides for `LID`, `Date`, `CT`, `Lib Conc`, and `Subtype`. Overridden values are rendered in italic
+in the detail view and main table. Each changed field also creates an automatic comment so reimports do not
+silently hide manual edits.
 
 ### LIMS Export
 

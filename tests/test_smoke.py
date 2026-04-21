@@ -21,6 +21,7 @@ from virtitta.app import (
     comment_link_label,
     create_app,
     format_value,
+    override_comment_text,
 )
 from virtitta.cli import build_parser
 from virtitta.config import load_config
@@ -38,6 +39,7 @@ from virtitta.repository import (
     list_stored_sample_categories,
     remove_samples_from_group,
     set_sample_category,
+    set_sample_field_overrides,
     update_qc_status,
 )
 
@@ -424,6 +426,116 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertNotEqual(raw["sample_metadata"]["library_concentration_ng_ul"], 88.8)
         self.assertNotEqual(raw["sample_metadata"]["library_fragment_length_bp"], 777)
 
+    def test_sample_field_overrides_survive_reimport_without_changing_imported_values(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+
+        conn = connect(config.database.path)
+        try:
+            imported_before = get_sample(conn, "SAMPLE001_fixture_run")
+            changes = set_sample_field_overrides(
+                conn,
+                "SAMPLE001_fixture_run",
+                {
+                    "lid": "LIDOVERRIDE",
+                    "sequencing_date": "2026-02-03",
+                    "sample_metadata_ct": 19.8,
+                    "sample_metadata_library_concentration_ng_ul": 4.4,
+                    "typing_report_subtype": "2b",
+                },
+            )
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+            stored = conn.execute(
+                """
+                SELECT lid, sequencing_date, sample_metadata_ct, sample_metadata_library_concentration_ng_ul,
+                       typing_report_subtype
+                FROM samples
+                WHERE sample_run_id = ?
+                """,
+                ("SAMPLE001_fixture_run",),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self.assertEqual(len(changes), 5)
+        self.assertEqual(sample["lid"], "LIDOVERRIDE")
+        self.assertEqual(sample["imported_lid"], "LID001")
+        self.assertTrue(sample["lid_overridden"])
+        self.assertEqual(sample["sequencing_date"], "2026-02-03")
+        self.assertEqual(sample["sample_metadata_ct"], 19.8)
+        self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 4.4)
+        self.assertEqual(sample["typing_report_subtype"], "2b")
+        self.assertEqual(
+            tuple(stored),
+            (
+                imported_before["lid"],
+                imported_before["sequencing_date"],
+                imported_before["sample_metadata_ct"],
+                imported_before["sample_metadata_library_concentration_ng_ul"],
+                imported_before["typing_report_subtype"],
+            ),
+        )
+
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+            raw = json.loads(sample["raw_json"])
+        finally:
+            conn.close()
+
+        self.assertEqual(sample["lid"], "LIDOVERRIDE")
+        self.assertEqual(sample["sample_metadata_ct"], 19.8)
+        self.assertEqual(raw["lid"], imported_before["lid"])
+        self.assertEqual(raw["sample_metadata"]["ct"], imported_before["sample_metadata_ct"])
+
+    def test_sample_field_overrides_are_used_for_listing_filters_and_lims_export(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+
+        conn = connect(config.database.path)
+        try:
+            set_sample_field_overrides(
+                conn,
+                "SAMPLE001_fixture_run",
+                {
+                    "lid": "LIDOVERRIDE",
+                    "sample_metadata_ct": 19.8,
+                    "typing_report_subtype": "2b",
+                },
+            )
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+            rows_by_search = list_samples(conn, search="LIDOVERRIDE")
+            rows_by_subtype = list_samples(conn, subtype="2b")
+            rows_by_ct = list_samples(conn, max_ct=20.0)
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertEqual([row["sample_run_id"] for row in rows_by_search], ["SAMPLE001_fixture_run"])
+        self.assertEqual([row["sample_run_id"] for row in rows_by_subtype], ["SAMPLE001_fixture_run"])
+        self.assertEqual([row["sample_run_id"] for row in rows_by_ct], ["SAMPLE001_fixture_run"])
+        content = build_lims_export_content(config, [sample])
+        self.assertIn("LIDOVERRIDE\thcvtyp\tHCV genotyp 2b\t", content)
+        self.assertIn("LIDOVERRIDE\thcvqc\tPassed\t", content)
+
+    def test_setting_override_to_imported_value_clears_override(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+
+        conn = connect(config.database.path)
+        try:
+            set_sample_field_overrides(conn, "SAMPLE001_fixture_run", {"lid": "LIDOVERRIDE"})
+            changes = set_sample_field_overrides(conn, "SAMPLE001_fixture_run", {"lid": "LID001"})
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertEqual(changes[0]["field_name"], "lid")
+        self.assertTrue(changes[0]["cleared"])
+        self.assertEqual(sample["lid"], "LID001")
+        self.assertFalse(sample["lid_overridden"])
+
     def test_cli_parser_accepts_clarity_sample_info_flag(self) -> None:
         args = build_parser().parse_args(
             [
@@ -592,6 +704,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         try:
             set_sample_category(conn, ["SAMPLE001_fixture_run"], "production")
             add_samples_to_group(conn, ["SAMPLE001_fixture_run"], "cluster-A")
+            set_sample_field_overrides(conn, "SAMPLE001_fixture_run", {"lid": "LIDOVERRIDE"})
         finally:
             conn.close()
 
@@ -1267,6 +1380,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         try:
             set_sample_category(conn, ["SAMPLE001_fixture_run"], "production")
             add_samples_to_group(conn, ["SAMPLE001_fixture_run"], "cluster-A")
+            set_sample_field_overrides(conn, "SAMPLE001_fixture_run", {"lid": "LIDOVERRIDE"})
         finally:
             conn.close()
 
@@ -1293,6 +1407,60 @@ class VirtittaSmokeTests(unittest.TestCase):
         rendered = response.body.decode("utf-8")
         self.assertIn("Category:</strong> production", rendered)
         self.assertIn("Groups:</strong> cluster-A", rendered)
+        self.assertIn("overridden-value", rendered)
+        self.assertIn("Edit metadata", rendered)
+        self.assertIn("LIDOVERRIDE", rendered)
+        self.assertIn('name="sequencing_date" value="2026-04-08" placeholder="YYYY-MM-DD"', rendered)
+        self.assertNotIn('type="date" name="sequencing_date"', rendered)
+
+    def test_sample_override_route_updates_values_and_adds_comments(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(
+            route
+            for route in app.router.routes
+            if getattr(route, "path", None) == "/samples/{sample_run_id}/overrides"
+        )
+
+        response = asyncio.run(
+            route.endpoint(
+                "SAMPLE001_fixture_run",
+                lid="LIDEDIT",
+                sequencing_date="2026-02-03",
+                sample_metadata_ct="28.7",
+                sample_metadata_library_concentration_ng_ul="",
+                typing_report_subtype="4a",
+            )
+        )
+        self.assertEqual(response.status_code, 303)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+            comments = get_comments(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertEqual(sample["lid"], "LIDEDIT")
+        self.assertEqual(sample["sequencing_date"], "2026-02-03")
+        self.assertEqual(sample["sample_metadata_ct"], 28.7)
+        self.assertEqual(sample["typing_report_subtype"], "4a")
+        comment_bodies = [comment["body"] for comment in comments]
+        self.assertTrue(any("Manual override: LID changed from LID001 to LIDEDIT." in body for body in comment_bodies))
+        self.assertTrue(any("Manual override: Date changed from 2026-04-08 to 2026-02-03." in body for body in comment_bodies))
+        self.assertTrue(all(comment["author"] == "Virtitta" for comment in comments))
+
+    def test_override_comment_text_for_cleared_override(self) -> None:
+        text = override_comment_text(
+            {
+                "field_name": "sample_metadata_ct",
+                "old_value": 28.7,
+                "new_value": 31.2,
+                "cleared": True,
+            }
+        )
+        self.assertEqual(text, "Manual override cleared: CT now uses imported value 31.2.")
 
     def test_delete_comment_route_removes_comment(self) -> None:
         config = load_config(self.config_path)
