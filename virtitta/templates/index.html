@@ -162,7 +162,7 @@
               {% set sticky_class = 'sticky-col sticky-sample-id' %}
             {% elif column == 'sample_id' %}
               {% set sticky_class = 'sticky-col sticky-lid' %}
-            {% elif column == 'generated_date' %}
+            {% elif column == 'sequencing_date' or (column == 'generated_date' and 'sequencing_date' not in table_columns) %}
               {% set sticky_class = 'sticky-col sticky-date' %}
             {% elif column == 'sample_category' %}
               {% set sticky_class = 'sticky-col sticky-category' %}
@@ -203,7 +203,7 @@
               {% set sticky_class = 'sticky-col sticky-sample-id' %}
             {% elif column == 'sample_id' %}
               {% set sticky_class = 'sticky-col sticky-lid' %}
-            {% elif column == 'generated_date' %}
+            {% elif column == 'sequencing_date' or (column == 'generated_date' and 'sequencing_date' not in table_columns) %}
               {% set sticky_class = 'sticky-col sticky-date' %}
             {% elif column == 'sample_category' %}
               {% set sticky_class = 'sticky-col sticky-category' %}
@@ -286,6 +286,7 @@ const selectVisibleCheckbox = document.getElementById('select-visible-samples');
 const tableSearchInput = document.getElementById('table-search-input');
 const sampleCount = document.querySelector('[data-sample-count]');
 const clientEmptyState = document.getElementById('client-empty-state');
+const columnVisibilityStorageKey = 'virtitta.columnVisibility.v1';
 
 function showClientNotice(message, isError = false) {
   clientNotice.textContent = message;
@@ -387,6 +388,51 @@ function setVisibleSampleSelection(checked) {
     box.checked = checked;
   }
   syncSelectVisibleCheckbox();
+}
+
+function columnToggles() {
+  return Array.from(document.querySelectorAll('.js-col-toggle'));
+}
+
+function setColumnVisibility(column, visible) {
+  document.querySelectorAll(`.col-${column}`).forEach(cell => {
+    cell.classList.toggle('col-hidden', !visible);
+  });
+}
+
+function readSavedColumnVisibility() {
+  try {
+    const raw = window.localStorage.getItem(columnVisibilityStorageKey);
+    return raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function saveColumnVisibility() {
+  const visibility = {};
+  for (const toggle of columnToggles()) {
+    visibility[toggle.dataset.col] = toggle.checked;
+  }
+  try {
+    window.localStorage.setItem(columnVisibilityStorageKey, JSON.stringify(visibility));
+  } catch (error) {
+  }
+}
+
+function applySavedColumnVisibility() {
+  const visibility = readSavedColumnVisibility();
+  if (!visibility || typeof visibility !== 'object') {
+    return;
+  }
+  for (const toggle of columnToggles()) {
+    const column = toggle.dataset.col;
+    if (!Object.prototype.hasOwnProperty.call(visibility, column)) {
+      continue;
+    }
+    toggle.checked = Boolean(visibility[column]);
+    setColumnVisibility(column, toggle.checked);
+  }
 }
 
 async function copyTextToClipboard(text) {
@@ -495,13 +541,13 @@ for (const button of document.querySelectorAll('[data-select-none]')) {
   });
 }
 
-for (const toggle of document.querySelectorAll('.js-col-toggle')) {
+applySavedColumnVisibility();
+
+for (const toggle of columnToggles()) {
   toggle.addEventListener('change', () => {
     const column = toggle.dataset.col;
-    const hidden = !toggle.checked;
-    document.querySelectorAll(`.col-${column}`).forEach(cell => {
-      cell.classList.toggle('col-hidden', hidden);
-    });
+    setColumnVisibility(column, toggle.checked);
+    saveColumnVisibility();
   });
 }
 

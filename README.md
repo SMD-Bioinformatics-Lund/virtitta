@@ -111,6 +111,51 @@ PYTHONPATH=$PWD python -m virtitta.cli import-run \
 ```
 
 This imports or updates all samples from that run in the database.
+Virtitta stores both the import date from the QC summary generation timestamp and a sequencing date derived from
+the first six characters of the run name (`YYMMDD`). If the run name does not start with a valid date, the sequencing
+date falls back to the import date.
+
+If the run was restored or relocated and the QC summaries are missing sample metadata that originally came from
+`clarity_sample_info.json`, you can pass that file explicitly:
+
+```bash
+PYTHONPATH=$PWD python -m virtitta.cli import-run \
+  --config virtitta.toml \
+  --run-dir /fs1/jonas/hcv/test_results/260317_A00681_1225_AHJMKLDRX7 \
+  --clarity-sample-info /path/to/clarity_sample_info.json
+```
+
+When provided, Virtitta uses that file to fill missing `CT`, library concentration, and library fragment length
+values for matching `sample_id` entries. Values already present in the per-sample QC summaries are kept.
+
+If a sample failed before `virpipa` produced any per-sample QC summary, add a sparse failed-sample row manually:
+
+```bash
+PYTHONPATH=$PWD python -m virtitta.cli import-sample \
+  --config virtitta.toml \
+  --sample-id SAMPLE123 \
+  --lid LID123 \
+  --ct 31.2 \
+  --library-concentration 1.7
+```
+
+Only `--config`, `--sample-id`, and `--lid` are required for `import-sample`. Use `--ct` and
+`--library-concentration` when `clarity_sample_info.json` is unavailable. If that file is available instead, pass it:
+
+```bash
+PYTHONPATH=$PWD python -m virtitta.cli import-sample \
+  --config virtitta.toml \
+  --sample-id SAMPLE123 \
+  --lid LID123 \
+  --clarity-sample-info /path/to/clarity_sample_info.json
+```
+
+This creates `sample_run_id = <sample_id>_<run_name>`, stores the LID, Date, and any provided CT/library values,
+and leaves analysis metrics and file links empty because no result files exist. The Date is the import date for
+manual failed-sample records.
+
+If `--run-dir` is omitted, Virtitta stores the row under the synthetic `manual_failed_samples` run. Pass
+`--run-dir /path/to/results/<run_name>` when you want the failed sample grouped with a specific run.
 
 Re-importing the same run is safe:
 
@@ -143,6 +188,7 @@ The main table is the primary work area. It includes:
 
 - `LID` as the presentation-first identifier
 - `Sample ID`
+- sequencing date and import date
 - subtype and BLAST identity
 - read and host/human filtering metrics
 - QC coverage and depth metrics

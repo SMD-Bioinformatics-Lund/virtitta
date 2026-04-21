@@ -67,7 +67,8 @@
       <tbody>
         <tr><th>LID</th><td>{{ format_value(sample["lid"]) }}</td></tr>
         <tr><th>Sample ID</th><td>{{ sample["sample_id"] }}</td></tr>
-        <tr><th>Date</th><td>{{ format_value(sample["generated_date"], "generated_date") }}</td></tr>
+        <tr><th>Date</th><td>{{ format_value(sample["sequencing_date"], "sequencing_date") }}</td></tr>
+        <tr><th>Import Date</th><td>{{ format_value(sample["generated_date"], "generated_date") }}</td></tr>
         <tr><th>Sample Run ID</th><td>{{ sample["sample_run_id"] }}</td></tr>
         <tr><th>Category</th><td>{{ sample["sample_category"] or "Unassigned" }}</td></tr>
         <tr><th>Groups</th><td>{{ sample["manual_groups"] or "None" }}</td></tr>

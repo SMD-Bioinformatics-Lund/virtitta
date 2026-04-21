@@ -22,14 +22,16 @@ from virtitta.app import (
     create_app,
     format_value,
 )
+from virtitta.cli import build_parser
 from virtitta.config import load_config
-from virtitta.importer import import_run
+from virtitta.importer import import_run, import_sample
 from virtitta.repository import (
     add_comment,
     add_samples_to_group,
     connect,
     get_comments,
     get_sample,
+    init_db,
     list_manual_groups,
     list_runs,
     list_samples,
@@ -92,6 +94,11 @@ class VirtittaSmokeTests(unittest.TestCase):
         for sample in samples:
             self.write_sample_summary(sample)
 
+    def write_clarity_sample_info(self, entries: dict[str, dict]) -> Path:
+        clarity_path = self.tmp_path / "clarity_sample_info.json"
+        clarity_path.write_text(json.dumps(entries), encoding="utf-8")
+        return clarity_path
+
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.tmp_path = Path(self.temp_dir.name)
@@ -150,17 +157,346 @@ class VirtittaSmokeTests(unittest.TestCase):
         try:
             run = conn.execute("SELECT run_name, sample_count FROM runs").fetchone()
             sample = conn.execute(
-                "SELECT sample_run_id, sample_results_relpath, generated_date FROM samples"
+                "SELECT sample_run_id, sample_results_relpath, sequencing_date, generated_date FROM samples"
             ).fetchone()
         finally:
             conn.close()
 
-        self.assertEqual(run, ("fixture_run", 1))
-        self.assertEqual(sample, ("SAMPLE001_fixture_run", "fixture_run/SAMPLE001/results", "2026-04-08"))
+        self.assertEqual(tuple(run), ("fixture_run", 1))
+        self.assertEqual(
+            sample,
+            ("SAMPLE001_fixture_run", "fixture_run/SAMPLE001/results", "2026-04-08", "2026-04-08"),
+        )
+
+    def test_import_run_derives_sequencing_date_from_run_name_prefix(self) -> None:
+        run_name = "260317_A00681_1225_AHJMKLDRX7"
+        run_dir = self.root / run_name
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        sample = fixture[0]
+        sample["run_name"] = run_name
+        sample["sample_run_id"] = f"{sample['sample_id']}_{run_name}"
+        sample["generated_at_utc"] = "2026-04-08T09:12:34Z"
+        summary_path = run_dir / sample["sample_id"] / "results" / f"{sample['sample_id']}_qc_summary.json"
+        summary_path.parent.mkdir(parents=True)
+        summary_path.write_text(json.dumps(sample), encoding="utf-8")
+
+        config = load_config(self.config_path)
+        import_run(config, run_dir)
+
+        conn = connect(config.database.path)
+        try:
+            stored = get_sample(conn, f"SAMPLE001_{run_name}")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(stored)
+        self.assertEqual(stored["sequencing_date"], "2026-03-17")
+        self.assertEqual(stored["generated_date"], "2026-04-08")
+
+    def test_init_db_backfills_sequencing_date_for_existing_rows(self) -> None:
+        legacy_db_path = self.tmp_path / "legacy.sqlite3"
+        conn = sqlite3.connect(legacy_db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute(
+                """
+                CREATE TABLE samples (
+                    sample_run_id TEXT PRIMARY KEY,
+                    run_name TEXT NOT NULL,
+                    generated_date TEXT,
+                    sample_id TEXT NOT NULL,
+                    lid TEXT,
+                    source_root_name TEXT,
+                    sample_results_relpath TEXT NOT NULL,
+                    typing_report_subtype TEXT,
+                    typing_main_blast_identity REAL,
+                    host_filter_reads_in INTEGER,
+                    host_filter_reads_removed_proportion REAL,
+                    qc_coverage_pct REAL,
+                    qc_mean_depth REAL,
+                    qc_coverage_1x_pct REAL,
+                    qc_coverage_10x_pct REAL,
+                    qc_coverage_100x_pct REAL,
+                    qc_coverage_1000x_pct REAL,
+                    sample_metadata_ct REAL,
+                    sample_metadata_library_concentration_ng_ul REAL,
+                    sample_metadata_library_fragment_length_bp INTEGER,
+                    raw_json TEXT NOT NULL,
+                    imported_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO samples (
+                    sample_run_id, run_name, generated_date, sample_id,
+                    sample_results_relpath, raw_json, imported_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "SAMPLE001_260317_run",
+                    "260317_run",
+                    "2026-04-08",
+                    "SAMPLE001",
+                    "260317_run/SAMPLE001/results",
+                    "{}",
+                    "2026-04-08T09:12:34Z",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO samples (
+                    sample_run_id, run_name, generated_date, sample_id,
+                    sample_results_relpath, raw_json, imported_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "FAILED001_manual_failed_samples",
+                    "manual_failed_samples",
+                    "2026-04-09",
+                    "FAILED001",
+                    "manual_failed_samples/FAILED001/results",
+                    "{}",
+                    "2026-04-09T09:12:34Z",
+                ),
+            )
+            init_db(conn)
+            rows = {
+                row["sample_run_id"]: row["sequencing_date"]
+                for row in conn.execute("SELECT sample_run_id, sequencing_date FROM samples").fetchall()
+            }
+        finally:
+            conn.close()
+
+        self.assertEqual(rows["SAMPLE001_260317_run"], "2026-03-17")
+        self.assertEqual(rows["FAILED001_manual_failed_samples"], "2026-04-09")
+
+    def test_import_sample_adds_failed_sample_without_qc_summary(self) -> None:
+        clarity_path = self.write_clarity_sample_info(
+            {
+                "sample_1": {
+                    "clarity_sample_id": "FAILED001",
+                    "CT": 31.2,
+                    "Library concentration (ng/ul)": 1.7,
+                }
+            }
+        )
+
+        config = load_config(self.config_path)
+        sample_run_id = import_sample(
+            config,
+            "FAILED001",
+            "LIDFAIL",
+            run_dir=self.run_dir,
+            clarity_sample_info_path=clarity_path,
+        )
+        self.assertEqual(sample_run_id, "FAILED001_fixture_run")
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "FAILED001_fixture_run")
+            run = conn.execute("SELECT run_name, sample_count FROM runs").fetchone()
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        self.assertEqual(tuple(run), ("fixture_run", 1))
+        self.assertEqual(sample["lid"], "LIDFAIL")
+        self.assertEqual(sample["sample_results_relpath"], "fixture_run/FAILED001/results")
+        self.assertEqual(sample["sequencing_date"], sample["generated_date"])
+        self.assertIsNotNone(sample["generated_date"])
+        self.assertIsNone(sample["qc_coverage_pct"])
+        self.assertEqual(sample["sample_metadata_ct"], 31.2)
+        self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 1.7)
+        raw = json.loads(sample["raw_json"])
+        self.assertEqual(raw["analysis_status"], "failed")
+        self.assertEqual(sample["generated_date"], raw["generated_at_utc"][:10])
+        self.assertFalse(raw["resistance"]["analysis_present"])
+
+    def test_import_run_keeps_manual_failed_samples_in_run_count(self) -> None:
+        config = load_config(self.config_path)
+        import_sample(config, "FAILED001", "LIDFAIL", run_dir=self.run_dir)
+        import_run(config, self.run_dir)
+
+        conn = connect(config.database.path)
+        try:
+            run = conn.execute("SELECT run_name, sample_count FROM runs").fetchone()
+            samples = list_samples(conn)
+        finally:
+            conn.close()
+
+        self.assertEqual(tuple(run), ("fixture_run", 2))
+        self.assertEqual(
+            {sample["sample_run_id"] for sample in samples},
+            {"FAILED001_fixture_run", "SAMPLE001_fixture_run"},
+        )
+
+    def test_import_sample_uses_cli_metadata_without_run_dir_or_clarity_json(self) -> None:
+        config = load_config(self.config_path)
+        sample_run_id = import_sample(
+            config,
+            "FAILED001",
+            "LIDFAIL",
+            ct=29.4,
+            library_concentration_ng_ul=2.3,
+        )
+        self.assertEqual(sample_run_id, "FAILED001_manual_failed_samples")
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "FAILED001_manual_failed_samples")
+            run = conn.execute("SELECT run_name, sample_count FROM runs").fetchone()
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        self.assertEqual(tuple(run), ("manual_failed_samples", 1))
+        self.assertEqual(sample["sample_results_relpath"], "manual_failed_samples/FAILED001/results")
+        self.assertEqual(sample["sequencing_date"], sample["generated_date"])
+        self.assertIsNotNone(sample["generated_date"])
+        self.assertEqual(sample["sample_metadata_ct"], 29.4)
+        self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 2.3)
+        raw = json.loads(sample["raw_json"])
+        self.assertEqual(sample["generated_date"], raw["generated_at_utc"][:10])
+        self.assertEqual(raw["sample_metadata"]["ct"], 29.4)
+        self.assertEqual(raw["sample_metadata"]["library_concentration_ng_ul"], 2.3)
+
+    def test_import_run_merges_missing_metadata_from_clarity_sample_info(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["sample_metadata"] = {}
+        self.write_run_summaries([fixture[0]])
+        clarity_path = self.write_clarity_sample_info(
+            {
+                "sample_1": {
+                    "clarity_sample_id": "SAMPLE001",
+                    "CT": 24.8,
+                    "Library concentration (ng/ul)": 5.6,
+                    "Library fragment length (bp)": 387,
+                }
+            }
+        )
+
+        config = load_config(self.config_path)
+        imported = import_run(config, self.run_dir, clarity_path)
+        self.assertEqual(imported, 1)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        self.assertEqual(sample["sample_metadata_ct"], 24.8)
+        self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 5.6)
+        self.assertEqual(sample["sample_metadata_library_fragment_length_bp"], 387)
+        raw = json.loads(sample["raw_json"])
+        self.assertEqual(raw["sample_metadata"]["ct"], 24.8)
+        self.assertEqual(raw["sample_metadata"]["library_concentration_ng_ul"], 5.6)
+        self.assertEqual(raw["sample_metadata"]["library_fragment_length_bp"], 387)
+
+    def test_import_run_prefers_qc_summary_metadata_over_clarity_sample_info(self) -> None:
+        clarity_path = self.write_clarity_sample_info(
+            {
+                "sample_1": {
+                    "clarity_sample_id": "SAMPLE001",
+                    "CT": 99.1,
+                    "Library concentration (ng/ul)": 88.8,
+                    "Library fragment length (bp)": 777,
+                }
+            }
+        )
+
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir, clarity_path)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        raw = json.loads(sample["raw_json"])
+        self.assertNotEqual(raw["sample_metadata"]["ct"], 99.1)
+        self.assertNotEqual(raw["sample_metadata"]["library_concentration_ng_ul"], 88.8)
+        self.assertNotEqual(raw["sample_metadata"]["library_fragment_length_bp"], 777)
+
+    def test_cli_parser_accepts_clarity_sample_info_flag(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "import-run",
+                "--config",
+                "virtitta.toml",
+                "--run-dir",
+                "/tmp/run",
+                "--clarity-sample-info",
+                "/tmp/clarity_sample_info.json",
+            ]
+        )
+
+        self.assertEqual(args.command, "import-run")
+        self.assertEqual(args.run_dir, "/tmp/run")
+        self.assertEqual(args.clarity_sample_info, "/tmp/clarity_sample_info.json")
+
+    def test_cli_parser_accepts_import_sample(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "import-sample",
+                "--config",
+                "virtitta.toml",
+                "--sample-id",
+                "FAILED001",
+                "--lid",
+                "LIDFAIL",
+                "--ct",
+                "29.4",
+                "--library-concentration",
+                "2.3",
+                "--run-dir",
+                "/tmp/run",
+                "--clarity-sample-info",
+                "/tmp/clarity_sample_info.json",
+            ]
+        )
+
+        self.assertEqual(args.command, "import-sample")
+        self.assertEqual(args.run_dir, "/tmp/run")
+        self.assertEqual(args.sample_id, "FAILED001")
+        self.assertEqual(args.lid, "LIDFAIL")
+        self.assertEqual(args.ct, 29.4)
+        self.assertEqual(args.library_concentration, 2.3)
+        self.assertEqual(args.clarity_sample_info, "/tmp/clarity_sample_info.json")
+
+    def test_cli_parser_accepts_minimal_import_sample(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "import-sample",
+                "--config",
+                "virtitta.toml",
+                "--sample-id",
+                "FAILED001",
+                "--lid",
+                "LIDFAIL",
+            ]
+        )
+
+        self.assertEqual(args.command, "import-sample")
+        self.assertEqual(args.config, "virtitta.toml")
+        self.assertEqual(args.run_dir, "")
+        self.assertEqual(args.sample_id, "FAILED001")
+        self.assertEqual(args.lid, "LIDFAIL")
+        self.assertIsNone(args.ct)
+        self.assertIsNone(args.library_concentration)
 
     def test_load_config_reads_annotation_categories_and_default_category_column(self) -> None:
         config = load_config(self.config_path)
         self.assertEqual(config.annotations.sample_categories, ["production", "validation", "EQA"])
+        self.assertEqual(config.ui.column_labels["sequencing_date"], "Date")
+        self.assertEqual(config.ui.column_labels["generated_date"], "Import Date")
+        self.assertIn("sequencing_date", config.ui.visible_columns)
         self.assertIn("sample_category", config.ui.visible_columns)
         self.assertIn("manual_groups", config.ui.visible_columns)
         self.assertNotIn("qc_coverage_1000x_pct", config.ui.visible_columns)
@@ -307,6 +643,8 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn('id="client-empty-state" hidden', rendered)
         self.assertIn('data-total-count="1"', rendered)
         self.assertIn("window.history.replaceState", rendered)
+        self.assertIn("virtitta.columnVisibility.v1", rendered)
+        self.assertIn("applySavedColumnVisibility();", rendered)
         self.assertIn("Apply category", rendered)
         self.assertIn("Add group", rendered)
 

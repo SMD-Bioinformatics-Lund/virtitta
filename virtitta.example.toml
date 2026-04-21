@@ -25,6 +25,7 @@ lims_root = "data/lims_exports"
 visible_columns = [
   "lid",
   "sample_id",
+  "sequencing_date",
   "generated_date",
   "sample_category",
   "qc_status",

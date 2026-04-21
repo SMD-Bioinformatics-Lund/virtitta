@@ -9,6 +9,7 @@ from pathlib import Path
 DEFAULT_VISIBLE_COLUMNS = [
     "lid",
     "sample_id",
+    "sequencing_date",
     "generated_date",
     "sample_category",
     "qc_status",
@@ -30,12 +31,14 @@ DEFAULT_VISIBLE_COLUMNS = [
 ]
 
 OPTIONAL_TABLE_COLUMNS = [
+    "sequencing_date",
     "manual_groups",
     "qc_coverage_1000x_pct",
 ]
 
 DEFAULT_COLUMN_LABELS = {
-    "generated_date": "Date",
+    "sequencing_date": "Date",
+    "generated_date": "Import Date",
     "sample_id": "Sample ID",
     "lid": "LID",
     "qc_status": "QC",

@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 SORTABLE_COLUMNS = {
+    "sequencing_date": "s.sequencing_date",
     "generated_date": "s.generated_date",
     "sample_run_id": "s.sample_run_id",
     "sample_id": "s.sample_id",
@@ -63,6 +64,35 @@ def _ensure_column(connection: sqlite3.Connection, table_name: str, column_name:
         connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
+def _sequencing_date_from_run_name(run_name: object, fallback_date: str | None) -> str | None:
+    text = str(run_name or "")
+    prefix = text[:6]
+    if len(prefix) == 6 and prefix.isdigit():
+        try:
+            return datetime.strptime(prefix, "%y%m%d").date().isoformat()
+        except ValueError:
+            pass
+    return fallback_date
+
+
+def _backfill_sequencing_dates(connection: sqlite3.Connection) -> None:
+    rows = connection.execute(
+        """
+        SELECT sample_run_id, run_name, generated_date
+        FROM samples
+        WHERE sequencing_date IS NULL OR sequencing_date = ''
+        """
+    ).fetchall()
+    for row in rows:
+        sequencing_date = _sequencing_date_from_run_name(row["run_name"], row["generated_date"])
+        if sequencing_date is None:
+            continue
+        connection.execute(
+            "UPDATE samples SET sequencing_date = ? WHERE sample_run_id = ?",
+            (sequencing_date, row["sample_run_id"]),
+        )
+
+
 def init_db(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
@@ -79,6 +109,7 @@ def init_db(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS samples (
             sample_run_id TEXT PRIMARY KEY,
             run_name TEXT NOT NULL REFERENCES runs(run_name) ON DELETE CASCADE,
+            sequencing_date TEXT,
             generated_date TEXT,
             sample_id TEXT NOT NULL,
             lid TEXT,
@@ -135,7 +166,9 @@ def init_db(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_comments_sample_run_id ON sample_comments(sample_run_id);
         """
     )
+    _ensure_column(connection, "samples", "sequencing_date", "TEXT")
     _ensure_column(connection, "samples", "generated_date", "TEXT")
+    _backfill_sequencing_dates(connection)
     connection.commit()
 
 
@@ -162,7 +195,7 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
     connection.execute(
         """
         INSERT INTO samples (
-            sample_run_id, run_name, generated_date, sample_id, lid, source_root_name, sample_results_relpath,
+            sample_run_id, run_name, sequencing_date, generated_date, sample_id, lid, source_root_name, sample_results_relpath,
             typing_report_subtype, typing_main_blast_identity,
             host_filter_reads_in, host_filter_reads_removed_proportion,
             qc_coverage_pct, qc_mean_depth, qc_coverage_1x_pct, qc_coverage_10x_pct,
@@ -171,7 +204,7 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
             raw_json, imported_at
         )
         VALUES (
-            :sample_run_id, :run_name, :generated_date, :sample_id, :lid, :source_root_name, :sample_results_relpath,
+            :sample_run_id, :run_name, :sequencing_date, :generated_date, :sample_id, :lid, :source_root_name, :sample_results_relpath,
             :typing_report_subtype, :typing_main_blast_identity,
             :host_filter_reads_in, :host_filter_reads_removed_proportion,
             :qc_coverage_pct, :qc_mean_depth, :qc_coverage_1x_pct, :qc_coverage_10x_pct,
@@ -181,6 +214,7 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
         )
         ON CONFLICT(sample_run_id) DO UPDATE SET
             run_name = excluded.run_name,
+            sequencing_date = excluded.sequencing_date,
             generated_date = excluded.generated_date,
             sample_id = excluded.sample_id,
             lid = excluded.lid,
@@ -211,6 +245,17 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
         ON CONFLICT(sample_run_id) DO NOTHING
         """,
         (sample_record["sample_run_id"], sample_record["imported_at"]),
+    )
+
+
+def sync_run_sample_count(connection: sqlite3.Connection, run_name: str) -> None:
+    sample_count = connection.execute(
+        "SELECT COUNT(*) AS count FROM samples WHERE run_name = ?",
+        (run_name,),
+    ).fetchone()["count"]
+    connection.execute(
+        "UPDATE runs SET sample_count = ? WHERE run_name = ?",
+        (sample_count, run_name),
     )
 
 

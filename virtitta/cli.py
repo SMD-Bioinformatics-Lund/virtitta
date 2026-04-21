@@ -4,8 +4,8 @@ import argparse
 from pathlib import Path
 
 
-def add_config_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--config", default=None, help="Path to virtitta TOML config")
+def add_config_argument(parser: argparse.ArgumentParser, *, required: bool = False) -> None:
+    parser.add_argument("--config", default=None, required=required, help="Path to virtitta TOML config")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,6 +20,34 @@ def build_parser() -> argparse.ArgumentParser:
     import_run = subparsers.add_parser("import-run", help="Import one completed virpipa run")
     add_config_argument(import_run)
     import_run.add_argument("--run-dir", required=True, help="Path to results/<run_name>")
+    import_run.add_argument(
+        "--clarity-sample-info",
+        default="",
+        help="Optional path to clarity_sample_info.json for restored or relocated runs",
+    )
+
+    import_sample = subparsers.add_parser("import-sample", help="Import one failed sample without QC output")
+    add_config_argument(import_sample, required=True)
+    import_sample.add_argument("--run-dir", default="", help="Optional path to results/<run_name>")
+    import_sample.add_argument("--sample-id", required=True, help="Sample ID used by virpipa")
+    import_sample.add_argument("--lid", required=True, help="LID shown as the primary UI identifier")
+    import_sample.add_argument(
+        "--ct",
+        type=float,
+        default=None,
+        help="Optional CT value when Clarity JSON is unavailable",
+    )
+    import_sample.add_argument(
+        "--library-concentration",
+        type=float,
+        default=None,
+        help="Optional library concentration in ng/ul when Clarity JSON is unavailable",
+    )
+    import_sample.add_argument(
+        "--clarity-sample-info",
+        default="",
+        help="Optional path to clarity_sample_info.json for CT and library metadata",
+    )
 
     import_root = subparsers.add_parser("import-root", help="Import every run under the configured results roots")
     add_config_argument(import_root)
@@ -38,7 +66,7 @@ def main() -> None:
 
     from virtitta.app import create_app
     from virtitta.config import load_config
-    from virtitta.importer import import_all_roots, import_run
+    from virtitta.importer import import_all_roots, import_run, import_sample
     from virtitta.repository import connect, init_db
 
     config = load_config(args.config or "virtitta.toml")
@@ -53,8 +81,25 @@ def main() -> None:
         return
 
     if args.command == "import-run":
-        imported = import_run(config, Path(args.run_dir))
+        imported = import_run(
+            config,
+            Path(args.run_dir),
+            Path(args.clarity_sample_info) if args.clarity_sample_info else None,
+        )
         print(f"Imported {imported} samples from {args.run_dir}")
+        return
+
+    if args.command == "import-sample":
+        sample_run_id = import_sample(
+            config,
+            args.sample_id,
+            args.lid,
+            run_dir=Path(args.run_dir) if args.run_dir else None,
+            clarity_sample_info_path=Path(args.clarity_sample_info) if args.clarity_sample_info else None,
+            ct=args.ct,
+            library_concentration_ng_ul=args.library_concentration,
+        )
+        print(f"Imported failed sample {sample_run_id}")
         return
 
     if args.command == "import-root":
