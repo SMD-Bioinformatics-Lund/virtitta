@@ -2,6 +2,9 @@
 
 Virtitta is a compact internal web interface for reviewing `virpipa` results.
 
+<img src="https://upload.wikimedia.org/wikipedia/commons/thumb/9/94/Birdy.svg/250px-Birdy.svg.png" alt="Virtitta oculobservis">\
+_**Virtitta oculobservis**_
+
 It imports per-sample QC summaries from completed `virpipa` runs into a local SQLite database and provides:
 
 - a dense main table for all imported samples
