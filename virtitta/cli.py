@@ -52,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
     import_root = subparsers.add_parser("import-root", help="Import every run under the configured results roots")
     add_config_argument(import_root)
 
+    backfill_af_counts = subparsers.add_parser(
+        "backfill-af-counts",
+        help="Backfill flattened AF count columns from samples.raw_json",
+    )
+    add_config_argument(backfill_af_counts)
+
     serve = subparsers.add_parser("serve", help="Run the FastAPI development server")
     add_config_argument(serve)
     serve.add_argument("--host", default=None, help="Override host from config")
@@ -67,7 +73,7 @@ def main() -> None:
     from virtitta.app import create_app
     from virtitta.config import load_config
     from virtitta.importer import import_all_roots, import_run, import_sample
-    from virtitta.repository import connect, init_db
+    from virtitta.repository import backfill_variant_af_counts, connect, init_db
 
     config = load_config(args.config or "virtitta.toml")
 
@@ -105,6 +111,16 @@ def main() -> None:
     if args.command == "import-root":
         imported = import_all_roots(config)
         print(f"Imported {imported} samples from configured roots")
+        return
+
+    if args.command == "backfill-af-counts":
+        connection = connect(config.database.path)
+        try:
+            init_db(connection)
+            updated = backfill_variant_af_counts(connection)
+        finally:
+            connection.close()
+        print(f"Backfilled AF counts for {updated} sample(s)")
         return
 
     if args.command == "serve":

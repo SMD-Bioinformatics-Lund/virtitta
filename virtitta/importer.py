@@ -124,6 +124,7 @@ def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpa
     typing = sample.get("typing", {})
     host_filter = sample.get("host_filter", {})
     sample_metadata = sample.get("sample_metadata", {})
+    af_counts = sample.get("variants", {}).get("af_counts", {})
     imported_at = utc_now()
     generated_date = _extract_date_portion(sample.get("generated_at_utc")) or _extract_date_portion(imported_at)
 
@@ -146,6 +147,12 @@ def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpa
         "qc_coverage_10x_pct": coverage.get("10x"),
         "qc_coverage_100x_pct": coverage.get("100x"),
         "qc_coverage_1000x_pct": coverage.get("1000x"),
+        "variant_af_count_005": af_counts.get("0.05"),
+        "variant_af_count_01": af_counts.get("0.1"),
+        "variant_af_count_015": af_counts.get("0.15"),
+        "variant_af_count_02": af_counts.get("0.2"),
+        "variant_af_count_03": af_counts.get("0.3"),
+        "variant_af_count_04": af_counts.get("0.4"),
         "sample_metadata_ct": sample_metadata.get("ct"),
         "sample_metadata_library_concentration_ng_ul": sample_metadata.get("library_concentration_ng_ul"),
         "sample_metadata_library_fragment_length_bp": sample_metadata.get("library_fragment_length_bp"),

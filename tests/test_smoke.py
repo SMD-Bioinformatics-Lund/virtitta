@@ -29,6 +29,7 @@ from virtitta.importer import import_run, import_sample
 from virtitta.repository import (
     add_comment,
     add_samples_to_group,
+    backfill_variant_af_counts,
     connect,
     get_comments,
     get_sample,
@@ -159,15 +160,31 @@ class VirtittaSmokeTests(unittest.TestCase):
         try:
             run = conn.execute("SELECT run_name, sample_count FROM runs").fetchone()
             sample = conn.execute(
-                "SELECT sample_run_id, sample_results_relpath, sequencing_date, generated_date FROM samples"
+                """
+                SELECT sample_run_id, sample_results_relpath, sequencing_date, generated_date,
+                       variant_af_count_005, variant_af_count_01, variant_af_count_015,
+                       variant_af_count_02, variant_af_count_03, variant_af_count_04
+                FROM samples
+                """
             ).fetchone()
         finally:
             conn.close()
 
         self.assertEqual(tuple(run), ("fixture_run", 1))
         self.assertEqual(
-            sample,
-            ("SAMPLE001_fixture_run", "fixture_run/SAMPLE001/results", "2026-04-08", "2026-04-08"),
+            tuple(sample),
+            (
+                "SAMPLE001_fixture_run",
+                "fixture_run/SAMPLE001/results",
+                "2026-04-08",
+                "2026-04-08",
+                236,
+                210,
+                179,
+                151,
+                106,
+                92,
+            ),
         )
 
     def test_import_run_derives_sequencing_date_from_run_name_prefix(self) -> None:
@@ -536,6 +553,48 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(sample["lid"], "LID001")
         self.assertFalse(sample["lid_overridden"])
 
+    def test_backfill_variant_af_counts_updates_existing_rows_from_raw_json(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+
+        conn = connect(config.database.path)
+        try:
+            conn.execute(
+                """
+                UPDATE samples
+                SET
+                    variant_af_count_005 = NULL,
+                    variant_af_count_01 = NULL,
+                    variant_af_count_015 = NULL,
+                    variant_af_count_02 = NULL,
+                    variant_af_count_03 = NULL,
+                    variant_af_count_04 = NULL
+                WHERE sample_run_id = ?
+                """,
+                ("SAMPLE001_fixture_run",),
+            )
+            conn.commit()
+            updated = backfill_variant_af_counts(conn)
+            sample = conn.execute(
+                """
+                SELECT
+                    variant_af_count_005,
+                    variant_af_count_01,
+                    variant_af_count_015,
+                    variant_af_count_02,
+                    variant_af_count_03,
+                    variant_af_count_04
+                FROM samples
+                WHERE sample_run_id = ?
+                """,
+                ("SAMPLE001_fixture_run",),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self.assertEqual(updated, 1)
+        self.assertEqual(tuple(sample), (236, 210, 179, 151, 106, 92))
+
     def test_cli_parser_accepts_clarity_sample_info_flag(self) -> None:
         args = build_parser().parse_args(
             [
@@ -603,15 +662,39 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIsNone(args.ct)
         self.assertIsNone(args.library_concentration)
 
+    def test_cli_parser_accepts_backfill_af_counts(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "backfill-af-counts",
+                "--config",
+                "virtitta.toml",
+            ]
+        )
+
+        self.assertEqual(args.command, "backfill-af-counts")
+        self.assertEqual(args.config, "virtitta.toml")
+
     def test_load_config_reads_annotation_categories_and_default_category_column(self) -> None:
         config = load_config(self.config_path)
         self.assertEqual(config.annotations.sample_categories, ["production", "validation", "EQA"])
         self.assertEqual(config.ui.column_labels["sequencing_date"], "Date")
         self.assertEqual(config.ui.column_labels["generated_date"], "Import Date")
+        self.assertEqual(config.ui.column_labels["variant_af_count_005"], "af 0.05")
+        self.assertEqual(config.ui.column_labels["variant_af_count_01"], "af 0.1")
+        self.assertEqual(config.ui.column_labels["variant_af_count_015"], "af 0.15")
+        self.assertEqual(config.ui.column_labels["variant_af_count_02"], "af 0.2")
+        self.assertEqual(config.ui.column_labels["variant_af_count_03"], "af 0.3")
+        self.assertEqual(config.ui.column_labels["variant_af_count_04"], "af 0.4")
         self.assertIn("sequencing_date", config.ui.visible_columns)
         self.assertIn("sample_category", config.ui.visible_columns)
         self.assertIn("manual_groups", config.ui.visible_columns)
         self.assertNotIn("qc_coverage_1000x_pct", config.ui.visible_columns)
+        self.assertNotIn("variant_af_count_005", config.ui.visible_columns)
+        self.assertNotIn("variant_af_count_01", config.ui.visible_columns)
+        self.assertNotIn("variant_af_count_015", config.ui.visible_columns)
+        self.assertNotIn("variant_af_count_02", config.ui.visible_columns)
+        self.assertNotIn("variant_af_count_03", config.ui.visible_columns)
+        self.assertNotIn("variant_af_count_04", config.ui.visible_columns)
 
     def test_index_route_returns_template_response(self) -> None:
         config = load_config(self.config_path)
@@ -748,11 +831,25 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn('data-col="manual_groups" checked', rendered)
         self.assertIn('data-col="qc_coverage_1000x_pct"', rendered)
         self.assertNotIn('data-col="qc_coverage_1000x_pct" checked', rendered)
+        self.assertIn('data-col="variant_af_count_005"', rendered)
+        self.assertIn('data-col="variant_af_count_01"', rendered)
+        self.assertIn('data-col="variant_af_count_015"', rendered)
+        self.assertIn('data-col="variant_af_count_02"', rendered)
+        self.assertIn('data-col="variant_af_count_03"', rendered)
+        self.assertIn('data-col="variant_af_count_04"', rendered)
+        self.assertNotIn('data-col="variant_af_count_005" checked', rendered)
+        self.assertNotIn('data-col="variant_af_count_01" checked', rendered)
+        self.assertNotIn('data-col="variant_af_count_015" checked', rendered)
+        self.assertNotIn('data-col="variant_af_count_02" checked', rendered)
+        self.assertNotIn('data-col="variant_af_count_03" checked', rendered)
+        self.assertNotIn('data-col="variant_af_count_04" checked', rendered)
         self.assertIn(">Cat<", rendered)
         self.assertIn(">QC<", rendered)
         self.assertIn(">Cov %<", rendered)
         self.assertIn(">Depth<", rendered)
         self.assertIn(">Frag bp<", rendered)
+        self.assertIn(">af 0.05<", rendered)
+        self.assertIn(">af 0.1<", rendered)
         self.assertIn('id="client-empty-state" hidden', rendered)
         self.assertIn('data-total-count="1"', rendered)
         self.assertIn("window.history.replaceState", rendered)

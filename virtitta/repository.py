@@ -25,6 +25,12 @@ SORTABLE_COLUMNS = {
     "qc_coverage_10x_pct": "s.qc_coverage_10x_pct",
     "qc_coverage_100x_pct": "s.qc_coverage_100x_pct",
     "qc_coverage_1000x_pct": "s.qc_coverage_1000x_pct",
+    "variant_af_count_005": "s.variant_af_count_005",
+    "variant_af_count_01": "s.variant_af_count_01",
+    "variant_af_count_015": "s.variant_af_count_015",
+    "variant_af_count_02": "s.variant_af_count_02",
+    "variant_af_count_03": "s.variant_af_count_03",
+    "variant_af_count_04": "s.variant_af_count_04",
     "sample_metadata_ct": "s.sample_metadata_ct",
     "sample_metadata_library_concentration_ng_ul": "s.sample_metadata_library_concentration_ng_ul",
     "sample_metadata_library_fragment_length_bp": "s.sample_metadata_library_fragment_length_bp",
@@ -215,6 +221,12 @@ def init_db(connection: sqlite3.Connection) -> None:
             qc_coverage_10x_pct REAL,
             qc_coverage_100x_pct REAL,
             qc_coverage_1000x_pct REAL,
+            variant_af_count_005 INTEGER,
+            variant_af_count_01 INTEGER,
+            variant_af_count_015 INTEGER,
+            variant_af_count_02 INTEGER,
+            variant_af_count_03 INTEGER,
+            variant_af_count_04 INTEGER,
             sample_metadata_ct REAL,
             sample_metadata_library_concentration_ng_ul REAL,
             sample_metadata_library_fragment_length_bp INTEGER,
@@ -267,8 +279,71 @@ def init_db(connection: sqlite3.Connection) -> None:
     )
     _ensure_column(connection, "samples", "sequencing_date", "TEXT")
     _ensure_column(connection, "samples", "generated_date", "TEXT")
+    _ensure_column(connection, "samples", "variant_af_count_005", "INTEGER")
+    _ensure_column(connection, "samples", "variant_af_count_01", "INTEGER")
+    _ensure_column(connection, "samples", "variant_af_count_015", "INTEGER")
+    _ensure_column(connection, "samples", "variant_af_count_02", "INTEGER")
+    _ensure_column(connection, "samples", "variant_af_count_03", "INTEGER")
+    _ensure_column(connection, "samples", "variant_af_count_04", "INTEGER")
     _backfill_sequencing_dates(connection)
     connection.commit()
+
+
+def backfill_variant_af_counts(connection: sqlite3.Connection) -> int:
+    rows = connection.execute(
+        """
+        SELECT
+            sample_run_id,
+            raw_json,
+            variant_af_count_005,
+            variant_af_count_01,
+            variant_af_count_015,
+            variant_af_count_02,
+            variant_af_count_03,
+            variant_af_count_04
+        FROM samples
+        """
+    ).fetchall()
+    updated = 0
+    for row in rows:
+        raw = json.loads(row["raw_json"])
+        variants = raw.get("variants", {}) if isinstance(raw, dict) else {}
+        af_counts = variants.get("af_counts", {}) if isinstance(variants, dict) else {}
+        values = (
+            af_counts.get("0.05"),
+            af_counts.get("0.1"),
+            af_counts.get("0.15"),
+            af_counts.get("0.2"),
+            af_counts.get("0.3"),
+            af_counts.get("0.4"),
+        )
+        current = (
+            row["variant_af_count_005"],
+            row["variant_af_count_01"],
+            row["variant_af_count_015"],
+            row["variant_af_count_02"],
+            row["variant_af_count_03"],
+            row["variant_af_count_04"],
+        )
+        if current == values:
+            continue
+        connection.execute(
+            """
+            UPDATE samples
+            SET
+                variant_af_count_005 = ?,
+                variant_af_count_01 = ?,
+                variant_af_count_015 = ?,
+                variant_af_count_02 = ?,
+                variant_af_count_03 = ?,
+                variant_af_count_04 = ?
+            WHERE sample_run_id = ?
+            """,
+            (*values, row["sample_run_id"]),
+        )
+        updated += 1
+    connection.commit()
+    return updated
 
 
 def upsert_run(connection: sqlite3.Connection, run_record: dict) -> None:
@@ -299,6 +374,8 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
             host_filter_reads_in, host_filter_reads_removed_proportion,
             qc_coverage_pct, qc_mean_depth, qc_coverage_1x_pct, qc_coverage_10x_pct,
             qc_coverage_100x_pct, qc_coverage_1000x_pct,
+            variant_af_count_005, variant_af_count_01, variant_af_count_015,
+            variant_af_count_02, variant_af_count_03, variant_af_count_04,
             sample_metadata_ct, sample_metadata_library_concentration_ng_ul, sample_metadata_library_fragment_length_bp,
             raw_json, imported_at
         )
@@ -308,6 +385,8 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
             :host_filter_reads_in, :host_filter_reads_removed_proportion,
             :qc_coverage_pct, :qc_mean_depth, :qc_coverage_1x_pct, :qc_coverage_10x_pct,
             :qc_coverage_100x_pct, :qc_coverage_1000x_pct,
+            :variant_af_count_005, :variant_af_count_01, :variant_af_count_015,
+            :variant_af_count_02, :variant_af_count_03, :variant_af_count_04,
             :sample_metadata_ct, :sample_metadata_library_concentration_ng_ul, :sample_metadata_library_fragment_length_bp,
             :raw_json, :imported_at
         )
@@ -329,6 +408,12 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
             qc_coverage_10x_pct = excluded.qc_coverage_10x_pct,
             qc_coverage_100x_pct = excluded.qc_coverage_100x_pct,
             qc_coverage_1000x_pct = excluded.qc_coverage_1000x_pct,
+            variant_af_count_005 = excluded.variant_af_count_005,
+            variant_af_count_01 = excluded.variant_af_count_01,
+            variant_af_count_015 = excluded.variant_af_count_015,
+            variant_af_count_02 = excluded.variant_af_count_02,
+            variant_af_count_03 = excluded.variant_af_count_03,
+            variant_af_count_04 = excluded.variant_af_count_04,
             sample_metadata_ct = excluded.sample_metadata_ct,
             sample_metadata_library_concentration_ng_ul = excluded.sample_metadata_library_concentration_ng_ul,
             sample_metadata_library_fragment_length_bp = excluded.sample_metadata_library_fragment_length_bp,

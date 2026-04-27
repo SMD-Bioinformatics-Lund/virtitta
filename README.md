@@ -171,6 +171,13 @@ If you want to import every run under the configured roots:
 PYTHONPATH=$PWD python -m virtitta.cli import-root --config virtitta.toml
 ```
 
+If flattened AF count columns were added after samples were already imported, backfill them from the stored
+`samples.raw_json` without re-importing runs:
+
+```bash
+PYTHONPATH=$PWD python -m virtitta.cli backfill-af-counts --config virtitta.toml
+```
+
 ## Basic Workflow
 
 Typical use:

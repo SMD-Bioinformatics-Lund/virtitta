@@ -34,6 +34,12 @@ OPTIONAL_TABLE_COLUMNS = [
     "sequencing_date",
     "manual_groups",
     "qc_coverage_1000x_pct",
+    "variant_af_count_005",
+    "variant_af_count_01",
+    "variant_af_count_015",
+    "variant_af_count_02",
+    "variant_af_count_03",
+    "variant_af_count_04",
 ]
 
 DEFAULT_COLUMN_LABELS = {
@@ -54,6 +60,12 @@ DEFAULT_COLUMN_LABELS = {
     "qc_coverage_10x_pct": "10x %",
     "qc_coverage_100x_pct": "100x %",
     "qc_coverage_1000x_pct": "1000x %",
+    "variant_af_count_005": "af 0.05",
+    "variant_af_count_01": "af 0.1",
+    "variant_af_count_015": "af 0.15",
+    "variant_af_count_02": "af 0.2",
+    "variant_af_count_03": "af 0.3",
+    "variant_af_count_04": "af 0.4",
     "sample_metadata_ct": "CT",
     "sample_metadata_library_concentration_ng_ul": "Lib Conc",
     "sample_metadata_library_fragment_length_bp": "Frag bp",
