@@ -1385,9 +1385,15 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(rows[0]["sample_id"], "SAMPLE001")
         self.assertEqual(rows[1]["sample_id"], "SAMPLE002")
 
-    def test_lims_export_reuses_existing_rows_and_appends_qc(self) -> None:
+    def test_lims_export_uses_database_values_and_appends_qc(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
+        (self.sample_dir / "lid" / "LID001-2limsrs.txt").write_text(
+            "sample_id\tparameter_name\tparameter_value\tcomment\n"
+            "LID001\thcvtyp\tHCV genotyp stale\t\n"
+            "LID001\tlegacy_extra\tshould not export\t\n",
+            encoding="utf-8",
+        )
         conn = connect(config.database.path)
         try:
             update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
@@ -1405,6 +1411,7 @@ class VirtittaSmokeTests(unittest.TestCase):
                 "LID001\thcvqc\tPassed\t\n"
             ),
         )
+        self.assertNotIn("legacy_extra", export_text)
 
     def test_fasta_clipboard_content_uses_selected_output(self) -> None:
         config = load_config(self.config_path)

@@ -478,37 +478,31 @@ def normalize_lims_row(line: str) -> str:
     return "\t".join(parts[:4])
 
 
+def lims_export_lid(sample_row: dict) -> str:
+    return str(sample_row.get("lid") or sample_row.get("sample_id") or "")
+
+
+def lims_export_hcvtyp_value(sample_row: dict) -> str:
+    subtype = sample_row.get("typing_report_subtype") or ""
+    if not subtype:
+        return ""
+    return f"HCV genotyp {subtype}"
+
+
+LIMS_EXPORT_PARAMETERS = [
+    ("hcvtyp", lims_export_hcvtyp_value),
+    ("hcvqc", lambda sample_row: lims_qc_value(sample_row.get("qc_status"))),
+]
+
+
 def build_lims_export_rows(config: Config, sample_row: dict) -> list[str]:
-    raw = raw_json_for_sample(sample_row)
+    lid = lims_export_lid(sample_row)
     rows: list[str] = []
-    lid = sample_row.get("lid") or raw.get("lid") or sample_row.get("sample_id") or ""
-    subtype = (
-        sample_row.get("typing_report_subtype")
-        or raw.get("typing", {}).get("report_subtype")
-        or ""
-    )
-
-    try:
-        lims_file, _ = resolve_output_file(config, sample_row, "lid_2limsrs")
-    except HTTPException:
-        lims_file = None
-
-    if lims_file is not None:
-        for line in lims_file.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped == LIMS_EXPORT_HEADER:
-                continue
-            parts = normalize_lims_row(line).split("\t")
-            if lid:
-                parts[0] = str(lid)
-            if parts[1] == "hcvtyp" and subtype:
-                parts[2] = f"HCV genotyp {subtype}"
-            rows.append("\t".join(parts))
-    else:
-        if lid and subtype:
-            rows.append(normalize_lims_row(f"{lid}\thcvtyp\tHCV genotyp {subtype}\t"))
-
-    rows.append(normalize_lims_row(f"{lid}\thcvqc\t{lims_qc_value(sample_row.get('qc_status'))}\t"))
+    for parameter_name, value_builder in LIMS_EXPORT_PARAMETERS:
+        parameter_value = value_builder(sample_row)
+        if not parameter_value:
+            continue
+        rows.append(normalize_lims_row(f"{lid}\t{parameter_name}\t{parameter_value}\t"))
     return rows
 
 
