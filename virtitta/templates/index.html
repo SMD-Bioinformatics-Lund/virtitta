@@ -169,7 +169,7 @@
             {% elif column == 'qc_status' %}
               {% set sticky_class = 'sticky-col sticky-qc-status' %}
             {% endif %}
-            <th class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %}">
+            <th class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %}" style="{{ column_style(column) }}">
               <a class="sort-link" href="{{ index_query_url(sort=column, desc=bool_query_value(next_desc)) }}">
                 {{ column_labels.get(column, column) }}
                 {% if is_active_sort %}
@@ -210,7 +210,7 @@
             {% elif column == 'qc_status' %}
               {% set sticky_class = 'sticky-col sticky-qc-status' %}
             {% endif %}
-            <td class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}"{% if column == 'host_filter_reads_removed_proportion' %} style="{{ cell_style(column, value) }}"{% endif %}{% if column == 'resistance_summary' %} data-export-value="{{ row['resistance_summary_tooltip'].replace('\n', ', ') }}"{% endif %}>
+            <td class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}" style="{{ column_style(column) }}{% if column == 'host_filter_reads_removed_proportion' %}{{ cell_style(column, value) }}{% endif %}"{% if column == 'resistance_summary' %} data-export-value="{{ row['resistance_summary_tooltip'].replace('\n', ', ') }}"{% endif %}>
               {% if column == 'lid' %}
               <a class="{% if row.get('lid_overridden') %}overridden-value{% endif %}" href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}" {% if row.get('lid_overridden') %}title="Imported: {{ format_value(row.get('imported_lid')) }}"{% endif %}>{{ display_identifier(row) }}</a>
               {% elif column == 'sample_category' %}
@@ -226,7 +226,8 @@
                 </div>
               </div>
               {% else %}
-              <span class="{% if row.get(column ~ '_overridden') %}overridden-value{% endif %}" {% if row.get(column ~ '_overridden') %}title="Imported: {{ format_value(row.get('imported_' ~ column), column) }}"{% endif %}>{{ format_value(value, column) }}</span>
+              {% set formatted_value = format_value(value, column) %}
+              <span class="cell-content {% if row.get(column ~ '_overridden') %}overridden-value{% endif %}" title="{% if row.get(column ~ '_overridden') %}Imported: {{ format_value(row.get('imported_' ~ column), column) }}{% else %}{{ formatted_value }}{% endif %}">{{ formatted_value }}</span>
               {% endif %}
             </td>
             {% endfor %}

@@ -441,6 +441,19 @@ button.secondary,
   line-height: 1.12;
 }
 
+.dense-table th[style*="--column-max-width"],
+.dense-table td[style*="--column-max-width"] {
+  max-width: var(--column-max-width);
+}
+
+.dense-table td[style*="--column-max-width"] .cell-content {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+
 .dense-table th:first-child,
 .dense-table td:first-child,
 .detail-table th:first-child,

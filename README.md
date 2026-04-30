@@ -45,6 +45,8 @@ Important settings:
   - complete main table data-column order, including columns hidden by default
 - `ui.visible_columns`
   - subset of `ui.table_columns` shown in the main table by default
+- `ui.column_max_widths`
+  - optional CSS width caps for specific columns, for example `run_name = "180px"`; capped cells truncate visually and keep the full value on hover
 - `ui.highlight_rules`
   - numeric threshold coloring rules
 

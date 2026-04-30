@@ -262,6 +262,13 @@ def cell_style(column: str, value: object) -> str:
     return f"--data-bar-width:{percent:.3f}%;"
 
 
+def column_style(config: Config, column: str) -> str:
+    max_width = config.ui.column_max_widths.get(column, "")
+    if not max_width:
+        return ""
+    return f"--column-max-width:{max_width};"
+
+
 def comment_link_label(row: dict) -> str:
     count = int(row.get("comment_count") or 0)
     if count <= 0:
@@ -749,6 +756,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "cell_class": lambda column, value: cell_class(config, column, value),
                 "cell_display_class": cell_display_class,
                 "cell_style": cell_style,
+                "column_style": lambda column: column_style(config, column),
                 "comment_link_label": comment_link_label,
                 "row_class": row_class,
                 "format_value": format_value,

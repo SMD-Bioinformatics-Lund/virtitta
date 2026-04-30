@@ -17,6 +17,7 @@ from virtitta.app import (
     build_resistance_cells,
     build_resistance_mutations,
     column_visibility_storage_key,
+    column_style,
     resistance_tooltip_text,
     cell_style,
     comment_link_label,
@@ -687,6 +688,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(config.ui.column_labels["variant_af_count_02"], "af 0.2")
         self.assertEqual(config.ui.column_labels["variant_af_count_03"], "af 0.3")
         self.assertEqual(config.ui.column_labels["variant_af_count_04"], "af 0.4")
+        self.assertEqual(config.ui.column_max_widths, {})
         self.assertIn("qc_coverage_1000x_pct", config.ui.table_columns)
         self.assertIn("variant_af_count_005", config.ui.table_columns)
         self.assertEqual(table_columns(config), config.ui.table_columns)
@@ -736,6 +738,26 @@ class VirtittaSmokeTests(unittest.TestCase):
         changed_config = load_config(self.config_path)
 
         self.assertNotEqual(original_key, column_visibility_storage_key(changed_config))
+
+    def test_load_config_reads_column_max_widths(self) -> None:
+        self.config_path.write_text(
+            self.config_path.read_text(encoding="utf-8")
+            + "\n".join(
+                [
+                    "",
+                    "[ui.column_max_widths]",
+                    'run_name = "180px"',
+                    'sample_id = "12rem"',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        config = load_config(self.config_path)
+
+        self.assertEqual(config.ui.column_max_widths["run_name"], "180px")
+        self.assertEqual(column_style(config, "run_name"), "--column-max-width:180px;")
+        self.assertEqual(column_style(config, "lid"), "")
 
     def test_index_route_returns_template_response(self) -> None:
         config = load_config(self.config_path)
@@ -958,6 +980,59 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertLess(header.index("col-lid"), header.index("col-qc_coverage_1000x_pct"))
         self.assertLess(header.index("col-qc_coverage_1000x_pct"), header.index("col-sample_id"))
         self.assertIn('col-qc_coverage_1000x_pct  col-hidden', header)
+
+    def test_index_route_renders_column_width_cap_and_hover_title(self) -> None:
+        self.config_path.write_text(
+            self.config_path.read_text(encoding="utf-8")
+            + "\n".join(
+                [
+                    "",
+                    "[ui.column_max_widths]",
+                    'run_name = "180px"',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": "/",
+                "raw_path": b"/",
+                "query_string": b"",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "app": app,
+                "router": app.router,
+            }
+        )
+
+        response = route.endpoint(
+            request,
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        )
+
+        rendered = response.body.decode("utf-8")
+        self.assertIn('class="col-run_name', rendered)
+        self.assertIn('style="--column-max-width:180px;"', rendered)
+        self.assertIn('class="cell-content " title="fixture_run">fixture_run</span>', rendered)
 
     def test_igv_url_contains_expected_files(self) -> None:
         config = load_config(self.config_path)

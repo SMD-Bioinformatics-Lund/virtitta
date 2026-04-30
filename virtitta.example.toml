@@ -78,6 +78,9 @@ visible_columns = [
 default_sort = "run_name"
 default_sort_desc = true
 
+[ui.column_max_widths]
+run_name = "180px"
+
 [ui.highlight_rules.host_filter_reads_removed_proportion]
 warn_over = 0.01
 danger_over = 0.05

@@ -128,6 +128,7 @@ class ExportSettings:
 class UiSettings:
     table_columns: list[str] = field(default_factory=lambda: list(DEFAULT_TABLE_COLUMNS))
     visible_columns: list[str] = field(default_factory=lambda: list(DEFAULT_VISIBLE_COLUMNS))
+    column_max_widths: dict[str, str] = field(default_factory=dict)
     default_sort: str = "run_name"
     default_sort_desc: bool = True
     column_labels: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_COLUMN_LABELS))
@@ -201,6 +202,16 @@ def _configured_table_columns(ui_raw: dict, visible_columns: list[str]) -> list[
     return table_columns
 
 
+def _normalize_string_map(raw_values: object) -> dict[str, str]:
+    if not isinstance(raw_values, dict):
+        return {}
+    return {
+        str(key).strip(): str(value).strip()
+        for key, value in raw_values.items()
+        if str(key).strip() and str(value).strip()
+    }
+
+
 def load_config(config_path: str | Path | None = None) -> Config:
     path = Path(config_path or os.environ.get("VIRTITTA_CONFIG", "virtitta.toml"))
     if not path.exists():
@@ -270,6 +281,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
         ui=UiSettings(
             table_columns=table_columns,
             visible_columns=visible_columns,
+            column_max_widths=_normalize_string_map(ui_raw.get("column_max_widths")),
             default_sort=str(ui_raw.get("default_sort", "run_name")),
             default_sort_desc=bool(ui_raw.get("default_sort_desc", True)),
             column_labels=_merge_labels(ui_raw.get("column_labels")),
