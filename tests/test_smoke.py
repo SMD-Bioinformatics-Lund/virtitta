@@ -921,6 +921,8 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn('data-filter-form', rendered)
         self.assertIn('name="run_name" class="js-auto-submit-filter"', rendered)
         self.assertIn("filterForm.requestSubmit();", rendered)
+        self.assertIn('data-export-value="Run"', rendered)
+        self.assertIn('data-export-value="Comments"', rendered)
         self.assertIn("Apply category", rendered)
         self.assertIn("Add group", rendered)
 
@@ -1042,6 +1044,54 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn('class="col-comment_count"', rendered)
         self.assertIn('style="--column-max-width:120px;" data-export-value="bob: Second comment body | alice: First comment body"', rendered)
         self.assertIn('class="cell-content " title="fixture_run">fixture_run</span>', rendered)
+
+    def test_index_route_exports_full_category_and_clean_header_labels(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            set_sample_category(conn, ["SAMPLE001_fixture_run"], "production")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": "/",
+                "raw_path": b"/",
+                "query_string": b"",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "app": app,
+                "router": app.router,
+            }
+        )
+
+        response = route.endpoint(
+            request,
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        )
+
+        rendered = response.body.decode("utf-8")
+        self.assertIn('data-export-value="Run"', rendered)
+        self.assertIn('data-export-value="Cat"', rendered)
+        self.assertIn('data-export-value="production"', rendered)
+        self.assertIn('title="production">Pro</span>', rendered)
 
     def test_igv_url_contains_expected_files(self) -> None:
         config = load_config(self.config_path)

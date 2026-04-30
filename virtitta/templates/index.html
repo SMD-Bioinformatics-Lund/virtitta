@@ -169,7 +169,7 @@
             {% elif column == 'qc_status' %}
               {% set sticky_class = 'sticky-col sticky-qc-status' %}
             {% endif %}
-            <th class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %}" style="{{ column_style(column) }}">
+            <th class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %}" style="{{ column_style(column) }}" data-export-value="{{ column_labels.get(column, column) }}">
               <a class="sort-link" href="{{ index_query_url(sort=column, desc=bool_query_value(next_desc)) }}">
                 {{ column_labels.get(column, column) }}
                 {% if is_active_sort %}
@@ -178,7 +178,7 @@
               </a>
             </th>
             {% endfor %}
-            <th class="col-comment_count" style="{{ column_style('comment_count') }}">
+            <th class="col-comment_count" style="{{ column_style('comment_count') }}" data-export-value="{{ column_labels.get('comment_count', 'Comments') }}">
               {% set next_desc = false if sort == 'comment_count' and desc else true %}
               <a class="sort-link" href="{{ index_query_url(sort='comment_count', desc=bool_query_value(next_desc)) }}">
                 {{ column_labels.get('comment_count', 'Comments') }}
@@ -210,7 +210,7 @@
             {% elif column == 'qc_status' %}
               {% set sticky_class = 'sticky-col sticky-qc-status' %}
             {% endif %}
-            <td class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}" style="{{ column_style(column) }}{% if column == 'host_filter_reads_removed_proportion' %}{{ cell_style(column, value) }}{% endif %}"{% if column == 'resistance_summary' %} data-export-value="{{ row['resistance_summary_tooltip'].replace('\n', ', ') }}"{% endif %}>
+            <td class="col-{{ column }} {{ sticky_class }} {% if column not in visible_column_set %}col-hidden{% endif %} {{ cell_class(column, value) }} {{ cell_display_class(column, row) }} {% if column == 'host_filter_reads_removed_proportion' %}cell-data-bar{% endif %}" style="{{ column_style(column) }}{% if column == 'host_filter_reads_removed_proportion' %}{{ cell_style(column, value) }}{% endif %}"{% if column == 'resistance_summary' %} data-export-value="{{ row['resistance_summary_tooltip'].replace('\n', ', ') }}"{% elif column == 'sample_category' %} data-export-value="{{ value or '' }}"{% endif %}>
               {% if column == 'lid' %}
               <a class="{% if row.get('lid_overridden') %}overridden-value{% endif %}" href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}" {% if row.get('lid_overridden') %}title="Imported: {{ format_value(row.get('imported_lid')) }}"{% endif %}>{{ display_identifier(row) }}</a>
               {% elif column == 'sample_category' %}
@@ -498,7 +498,13 @@ function tableTextFromVisibleColumns() {
     !cell.classList.contains('col-actions')
   );
   const headerCells = Array.from(table.querySelectorAll('thead th')).filter(exportable);
-  rows.push(headerCells.map(cell => cell.innerText.trim()).join('\t'));
+  rows.push(headerCells.map(cell => {
+    const exportValue = cell.dataset.exportValue;
+    if (exportValue !== undefined) {
+      return exportValue.trim();
+    }
+    return cell.innerText.trim();
+  }).join('\t'));
 
   for (const row of sampleRows()) {
     if (row.hidden) {
