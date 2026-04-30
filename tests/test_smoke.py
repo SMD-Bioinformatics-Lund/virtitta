@@ -1446,7 +1446,34 @@ class VirtittaSmokeTests(unittest.TestCase):
         assert export_path is not None
         self.assertTrue(export_path.exists())
         self.assertEqual(export_path.parent.name, __import__("datetime").datetime.now().date().isoformat())
+        self.assertRegex(export_path.name, r"^LID001-2limsrs-\d{8}T\d{12}\.txt$")
         self.assertEqual(export_path.read_text(encoding="utf-8"), export_text)
+
+    def test_server_lims_export_uses_distinct_timestamped_filenames(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        export_text = build_lims_export_content(config, [sample])
+
+        from virtitta.app import write_server_lims_export
+
+        first_path = write_server_lims_export(config, [sample], export_text)
+        second_path = write_server_lims_export(config, [sample], export_text)
+        self.assertIsNotNone(first_path)
+        self.assertIsNotNone(second_path)
+        assert first_path is not None
+        assert second_path is not None
+        self.assertNotEqual(first_path.name, second_path.name)
+        self.assertRegex(first_path.name, r"^LID001-2limsrs-\d{8}T\d{12}\.txt$")
+        self.assertRegex(second_path.name, r"^LID001-2limsrs-\d{8}T\d{12}\.txt$")
+        self.assertNotRegex(second_path.name, r"-2\.txt$")
 
     def test_single_sample_lims_export_blocks_unreviewed(self) -> None:
         config = load_config(self.config_path)

@@ -551,14 +551,22 @@ def lims_export_filename(sample_rows: list[dict]) -> str:
     return "virtitta-2limsrs.txt"
 
 
+def timestamped_lims_export_filename(sample_rows: list[dict], timestamp: str) -> str:
+    filename = lims_export_filename(sample_rows)
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix
+    return f"{stem}-{timestamp}{suffix}"
+
+
 def write_server_lims_export(config: Config, sample_rows: list[dict], content: str) -> Path | None:
     if config.exports.lims_root is None:
         return None
 
-    export_dir = config.exports.lims_root / datetime.now().date().isoformat()
+    now = datetime.now()
+    export_dir = config.exports.lims_root / now.date().isoformat()
     export_dir.mkdir(parents=True, exist_ok=True)
 
-    base_name = lims_export_filename(sample_rows)
+    base_name = timestamped_lims_export_filename(sample_rows, now.strftime("%Y%m%dT%H%M%S%f"))
     candidate = export_dir / base_name
     stem = candidate.stem
     suffix = candidate.suffix
