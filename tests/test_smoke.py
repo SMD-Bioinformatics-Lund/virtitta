@@ -989,6 +989,7 @@ class VirtittaSmokeTests(unittest.TestCase):
                     "",
                     "[ui.column_max_widths]",
                     'run_name = "180px"',
+                    'comment_count = "120px"',
                 ]
             )
             + "\n",
@@ -996,6 +997,12 @@ class VirtittaSmokeTests(unittest.TestCase):
         )
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            add_comment(conn, "SAMPLE001_fixture_run", "First comment body", "alice")
+            add_comment(conn, "SAMPLE001_fixture_run", "Second comment body", "bob")
+        finally:
+            conn.close()
         app = create_app(self.config_path)
         route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
         request = Request(
@@ -1032,6 +1039,8 @@ class VirtittaSmokeTests(unittest.TestCase):
         rendered = response.body.decode("utf-8")
         self.assertIn('class="col-run_name', rendered)
         self.assertIn('style="--column-max-width:180px;"', rendered)
+        self.assertIn('class="col-comment_count"', rendered)
+        self.assertIn('style="--column-max-width:120px;" data-export-value="bob: Second comment body | alice: First comment body"', rendered)
         self.assertIn('class="cell-content " title="fixture_run">fixture_run</span>', rendered)
 
     def test_igv_url_contains_expected_files(self) -> None:

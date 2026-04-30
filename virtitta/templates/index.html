@@ -178,7 +178,7 @@
               </a>
             </th>
             {% endfor %}
-            <th class="col-comment_count">
+            <th class="col-comment_count" style="{{ column_style('comment_count') }}">
               {% set next_desc = false if sort == 'comment_count' and desc else true %}
               <a class="sort-link" href="{{ index_query_url(sort='comment_count', desc=bool_query_value(next_desc)) }}">
                 {{ column_labels.get('comment_count', 'Comments') }}
@@ -231,8 +231,9 @@
               {% endif %}
             </td>
             {% endfor %}
-            <td class="col-comment_count">
+            <td class="col-comment_count" style="{{ column_style('comment_count') }}" data-export-value="{{ (row['comment_preview'] or '').replace('\n---\n', ' | ').replace('\n', ' ') }}">
               <a
+                class="cell-content"
                 href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}#comments"
                 title="{{ row['comment_preview'] or 'No comments' }}"
               >{{ comment_link_label(row) }}</a>

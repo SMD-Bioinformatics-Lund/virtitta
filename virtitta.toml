@@ -81,6 +81,7 @@ default_sort_desc = true
 
 [ui.column_max_widths]
 run_name = "36ch"
+comment_count = "120px"
 
 [ui.highlight_rules.host_filter_reads_removed_proportion]
 warn_over = 0.1

@@ -46,7 +46,7 @@ Important settings:
 - `ui.visible_columns`
   - subset of `ui.table_columns` shown in the main table by default
 - `ui.column_max_widths`
-  - optional CSS width caps for specific columns, for example `run_name = "180px"`; capped cells truncate visually and keep the full value on hover
+  - optional CSS width caps for specific columns, for example `run_name = "36ch"` or `comment_count = "120px"`; capped cells truncate visually and keep the full value on hover
 - `ui.highlight_rules`
   - numeric threshold coloring rules
 
