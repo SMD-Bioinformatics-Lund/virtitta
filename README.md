@@ -41,8 +41,10 @@ Important settings:
   - usually `http://localhost:60151/load`
 - `results_roots[].windows_path`
   - Windows-visible root path used when constructing IGV URLs
+- `ui.table_columns`
+  - complete main table data-column order, including columns hidden by default
 - `ui.visible_columns`
-  - default columns shown in the main table
+  - subset of `ui.table_columns` shown in the main table by default
 - `ui.highlight_rules`
   - numeric threshold coloring rules
 

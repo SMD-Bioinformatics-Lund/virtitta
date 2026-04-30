@@ -1,21 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="panel">
-  <form method="get" action="{{ request.url_for('index') }}" class="filters filter-grid">
+  <form method="get" action="{{ request.url_for('index') }}" class="filters filter-grid" data-filter-form>
     <input type="text" id="table-search-input" name="search" value="{{ search }}" placeholder="Search sample, LID, run" autocomplete="off">
-    <select name="run_name">
+    <select name="run_name" class="js-auto-submit-filter">
       <option value="">All runs</option>
       {% for run in runs %}
       <option value="{{ run }}" {% if run == selected_run_name %}selected{% endif %}>{{ run }}</option>
       {% endfor %}
     </select>
-    <select name="subtype">
+    <select name="subtype" class="js-auto-submit-filter">
       <option value="">All subtypes</option>
       {% for subtype in subtypes %}
       <option value="{{ subtype }}" {% if subtype == selected_subtype %}selected{% endif %}>{{ subtype }}</option>
       {% endfor %}
     </select>
-    <select name="qc_status">
+    <select name="qc_status" class="js-auto-submit-filter">
       <option value="">All QC states</option>
       {% for status in qc_status_options %}
       <option value="{{ status }}" {% if status == selected_qc_status %}selected{% endif %}>{{ status }}</option>
@@ -25,12 +25,12 @@
       <summary>Categories{% if selected_sample_categories %} ({{ selected_sample_categories|length }}){% endif %}</summary>
       <div class="filter-checklist">
         <label class="column-toggle">
-          <input type="checkbox" name="sample_category" value="{{ category_unassigned_value }}" {% if category_unassigned_value in selected_sample_categories %}checked{% endif %}>
+          <input type="checkbox" name="sample_category" value="{{ category_unassigned_value }}" class="js-auto-submit-filter" {% if category_unassigned_value in selected_sample_categories %}checked{% endif %}>
           <span>Unassigned</span>
         </label>
         {% for category in available_sample_categories %}
         <label class="column-toggle">
-          <input type="checkbox" name="sample_category" value="{{ category }}" {% if category in selected_sample_categories %}checked{% endif %}>
+          <input type="checkbox" name="sample_category" value="{{ category }}" class="js-auto-submit-filter" {% if category in selected_sample_categories %}checked{% endif %}>
           <span>{{ category }}</span>
         </label>
         {% endfor %}
@@ -41,7 +41,7 @@
       <div class="filter-checklist">
         {% for group_name in available_manual_groups %}
         <label class="column-toggle">
-          <input type="checkbox" name="manual_group" value="{{ group_name }}" {% if group_name in selected_manual_groups %}checked{% endif %}>
+          <input type="checkbox" name="manual_group" value="{{ group_name }}" class="js-auto-submit-filter" {% if group_name in selected_manual_groups %}checked{% endif %}>
           <span>{{ group_name }}</span>
         </label>
         {% else %}
@@ -286,7 +286,8 @@ const selectVisibleCheckbox = document.getElementById('select-visible-samples');
 const tableSearchInput = document.getElementById('table-search-input');
 const sampleCount = document.querySelector('[data-sample-count]');
 const clientEmptyState = document.getElementById('client-empty-state');
-const columnVisibilityStorageKey = 'virtitta.columnVisibility.v1';
+const filterForm = document.querySelector('[data-filter-form]');
+const columnVisibilityStorageKey = {{ column_visibility_storage_key|tojson }};
 
 function showClientNotice(message, isError = false) {
   clientNotice.textContent = message;
@@ -518,6 +519,19 @@ if (tableSearchInput) {
   applyTableSearchFilter();
 } else {
   updateSampleCount();
+}
+
+if (filterForm) {
+  filterForm.addEventListener('change', event => {
+    if (!event.target.classList.contains('js-auto-submit-filter')) {
+      return;
+    }
+    if (filterForm.requestSubmit) {
+      filterForm.requestSubmit();
+      return;
+    }
+    filterForm.submit();
+  });
 }
 
 if (selectVisibleCheckbox) {

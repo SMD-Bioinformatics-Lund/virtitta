@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
@@ -10,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from virtitta.config import DEFAULT_COLUMN_LABELS, OPTIONAL_TABLE_COLUMNS, QC_STATUS_OPTIONS, Config, load_config
+from virtitta.config import DEFAULT_COLUMN_LABELS, QC_STATUS_OPTIONS, Config, load_config
 from virtitta.repository import (
     add_comment,
     add_samples_to_group,
@@ -169,11 +170,17 @@ def unique_strings(values: object) -> list[str]:
 
 
 def table_columns(config: Config) -> list[str]:
-    columns = list(config.ui.visible_columns)
-    for column in OPTIONAL_TABLE_COLUMNS:
-        if column not in columns:
-            columns.append(column)
-    return columns
+    return list(config.ui.table_columns)
+
+
+def column_visibility_storage_key(config: Config) -> str:
+    payload = {
+        "table_columns": config.ui.table_columns,
+        "visible_columns": config.ui.visible_columns,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    digest = hashlib.sha1(encoded).hexdigest()[:12]
+    return f"virtitta.columnVisibility.v2.{digest}"
 
 
 def configured_category_options(config: Config, stored_categories: list[str], selected_categories: list[str]) -> list[str]:
@@ -737,6 +744,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "table_columns": all_columns,
                 "visible_columns": config.ui.visible_columns,
                 "visible_column_set": visible_column_set,
+                "column_visibility_storage_key": column_visibility_storage_key(config),
                 "column_labels": {**DEFAULT_COLUMN_LABELS, **config.ui.column_labels},
                 "cell_class": lambda column, value: cell_class(config, column, value),
                 "cell_display_class": cell_display_class,

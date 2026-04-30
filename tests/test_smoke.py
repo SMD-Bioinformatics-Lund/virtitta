@@ -16,12 +16,14 @@ from virtitta.app import (
     build_lims_export_content,
     build_resistance_cells,
     build_resistance_mutations,
+    column_visibility_storage_key,
     resistance_tooltip_text,
     cell_style,
     comment_link_label,
     create_app,
     format_value,
     override_comment_text,
+    table_columns,
 )
 from virtitta.cli import build_parser
 from virtitta.config import load_config
@@ -685,6 +687,9 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(config.ui.column_labels["variant_af_count_02"], "af 0.2")
         self.assertEqual(config.ui.column_labels["variant_af_count_03"], "af 0.3")
         self.assertEqual(config.ui.column_labels["variant_af_count_04"], "af 0.4")
+        self.assertIn("qc_coverage_1000x_pct", config.ui.table_columns)
+        self.assertIn("variant_af_count_005", config.ui.table_columns)
+        self.assertEqual(table_columns(config), config.ui.table_columns)
         self.assertIn("sequencing_date", config.ui.visible_columns)
         self.assertIn("sample_category", config.ui.visible_columns)
         self.assertIn("manual_groups", config.ui.visible_columns)
@@ -695,6 +700,42 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertNotIn("variant_af_count_02", config.ui.visible_columns)
         self.assertNotIn("variant_af_count_03", config.ui.visible_columns)
         self.assertNotIn("variant_af_count_04", config.ui.visible_columns)
+
+    def test_load_config_preserves_legacy_column_order_without_table_columns(self) -> None:
+        config = load_config(self.config_path)
+        self.assertEqual(config.ui.table_columns[: len(config.ui.visible_columns)], config.ui.visible_columns)
+        self.assertEqual(config.ui.table_columns[-7], "qc_coverage_1000x_pct")
+        self.assertEqual(config.ui.table_columns[-6:], [
+            "variant_af_count_005",
+            "variant_af_count_01",
+            "variant_af_count_015",
+            "variant_af_count_02",
+            "variant_af_count_03",
+            "variant_af_count_04",
+        ])
+
+    def test_column_visibility_storage_key_changes_with_column_defaults(self) -> None:
+        config = load_config(self.config_path)
+        original_key = column_visibility_storage_key(config)
+
+        self.config_path.write_text(
+            self.config_path.read_text(encoding="utf-8")
+            + "\n".join(
+                [
+                    "",
+                    "[ui]",
+                    'table_columns = ["lid", "variant_af_count_005", "sample_id"]',
+                    'visible_columns = ["lid", "sample_id"]',
+                    'default_sort = "run_name"',
+                    "default_sort_desc = true",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        changed_config = load_config(self.config_path)
+
+        self.assertNotEqual(original_key, column_visibility_storage_key(changed_config))
 
     def test_index_route_returns_template_response(self) -> None:
         config = load_config(self.config_path)
@@ -853,10 +894,70 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn('id="client-empty-state" hidden', rendered)
         self.assertIn('data-total-count="1"', rendered)
         self.assertIn("window.history.replaceState", rendered)
-        self.assertIn("virtitta.columnVisibility.v1", rendered)
+        self.assertIn("virtitta.columnVisibility.v2.", rendered)
         self.assertIn("applySavedColumnVisibility();", rendered)
+        self.assertIn('data-filter-form', rendered)
+        self.assertIn('name="run_name" class="js-auto-submit-filter"', rendered)
+        self.assertIn("filterForm.requestSubmit();", rendered)
         self.assertIn("Apply category", rendered)
         self.assertIn("Add group", rendered)
+
+    def test_index_route_uses_configured_table_column_order_for_hidden_columns(self) -> None:
+        self.config_path.write_text(
+            self.config_path.read_text(encoding="utf-8")
+            + "\n".join(
+                [
+                    "",
+                    "[ui]",
+                    'table_columns = ["lid", "qc_coverage_1000x_pct", "sample_id", "run_name"]',
+                    'visible_columns = ["lid", "sample_id", "run_name"]',
+                    'default_sort = "run_name"',
+                    "default_sort_desc = true",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": "/",
+                "raw_path": b"/",
+                "query_string": b"",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "app": app,
+                "router": app.router,
+            }
+        )
+
+        response = route.endpoint(
+            request,
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        )
+
+        rendered = response.body.decode("utf-8")
+        header = rendered.split("<thead>", 1)[1].split("</thead>", 1)[0]
+        self.assertLess(header.index("col-lid"), header.index("col-qc_coverage_1000x_pct"))
+        self.assertLess(header.index("col-qc_coverage_1000x_pct"), header.index("col-sample_id"))
+        self.assertIn('col-qc_coverage_1000x_pct  col-hidden', header)
 
     def test_igv_url_contains_expected_files(self) -> None:
         config = load_config(self.config_path)

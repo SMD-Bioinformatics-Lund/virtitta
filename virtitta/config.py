@@ -42,6 +42,10 @@ OPTIONAL_TABLE_COLUMNS = [
     "variant_af_count_04",
 ]
 
+DEFAULT_TABLE_COLUMNS = DEFAULT_VISIBLE_COLUMNS + [
+    column for column in OPTIONAL_TABLE_COLUMNS if column not in DEFAULT_VISIBLE_COLUMNS
+]
+
 DEFAULT_COLUMN_LABELS = {
     "sequencing_date": "Date",
     "generated_date": "Import Date",
@@ -122,6 +126,7 @@ class ExportSettings:
 
 @dataclass(frozen=True)
 class UiSettings:
+    table_columns: list[str] = field(default_factory=lambda: list(DEFAULT_TABLE_COLUMNS))
     visible_columns: list[str] = field(default_factory=lambda: list(DEFAULT_VISIBLE_COLUMNS))
     default_sort: str = "run_name"
     default_sort_desc: bool = True
@@ -185,6 +190,17 @@ def _normalize_string_list(raw_values: object) -> list[str]:
     return normalized
 
 
+def _configured_table_columns(ui_raw: dict, visible_columns: list[str]) -> list[str]:
+    if "table_columns" in ui_raw:
+        return _normalize_string_list(ui_raw.get("table_columns"))
+
+    table_columns = list(visible_columns)
+    for column in OPTIONAL_TABLE_COLUMNS:
+        if column not in table_columns:
+            table_columns.append(column)
+    return table_columns
+
+
 def load_config(config_path: str | Path | None = None) -> Config:
     path = Path(config_path or os.environ.get("VIRTITTA_CONFIG", "virtitta.toml"))
     if not path.exists():
@@ -206,7 +222,8 @@ def load_config(config_path: str | Path | None = None) -> Config:
     ui_raw = raw.get("ui", {})
     root_entries = raw.get("results_roots", [])
 
-    visible_columns = [str(column) for column in ui_raw.get("visible_columns", DEFAULT_VISIBLE_COLUMNS)]
+    visible_columns = _normalize_string_list(ui_raw.get("visible_columns", DEFAULT_VISIBLE_COLUMNS))
+    table_columns = _configured_table_columns(ui_raw, visible_columns)
 
     roots = [
         ResultsRoot(
@@ -251,6 +268,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
             else None
         ),
         ui=UiSettings(
+            table_columns=table_columns,
             visible_columns=visible_columns,
             default_sort=str(ui_raw.get("default_sort", "run_name")),
             default_sort_desc=bool(ui_raw.get("default_sort_desc", True)),
