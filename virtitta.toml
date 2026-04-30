@@ -76,7 +76,7 @@ visible_columns = [
   "sample_metadata_library_fragment_length_bp",
   "run_name",
 ]
-default_sort = "run_name"
+default_sort = "sequencing_date"
 default_sort_desc = true
 
 [ui.column_max_widths]
