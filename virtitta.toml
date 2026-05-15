@@ -21,6 +21,10 @@ sample_categories = ["production", "validation", "EQA"]
 [exports]
 lims_root = "data/lims_exports"
 
+[cache]
+outputs_root = "data/output_cache"
+output_keys = ["export_fasta", "export_iupac_fasta", "display_rug_kde_plot"]
+
 [ui]
 table_columns = [
   "lid",

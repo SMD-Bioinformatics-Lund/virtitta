@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from virtitta.artifact_cache import get_cached_output_file, is_cacheable_output
 from virtitta.config import DEFAULT_COLUMN_LABELS, QC_STATUS_OPTIONS, Config, load_config
 from virtitta.repository import (
     add_comment,
@@ -528,12 +529,18 @@ def load_sample_rows(config: Config, sample_run_ids: list[str]) -> list[dict]:
 
 def build_fasta_clipboard_content(config: Config, sample_rows: list[dict], output_key: str) -> str:
     chunks: list[str] = []
-    for sample_row in sample_rows:
-        file_path, _ = resolve_output_file(config, sample_row, output_key)
-        text = file_path.read_text(encoding="utf-8")
-        if text and not text.endswith("\n"):
-            text = f"{text}\n"
-        chunks.append(text)
+    connection = connect(config.database.path)
+    try:
+        for sample_row in sample_rows:
+            file_path = get_cached_output_file(config, connection, sample_row["sample_run_id"], output_key)
+            if file_path is None:
+                file_path, _ = resolve_output_file(config, sample_row, output_key)
+            text = file_path.read_text(encoding="utf-8")
+            if text and not text.endswith("\n"):
+                text = f"{text}\n"
+            chunks.append(text)
+    finally:
+        connection.close()
     return "".join(chunks)
 
 
@@ -1139,14 +1146,20 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.get("/samples/{sample_run_id}/files/{output_key}")
     def sample_file(sample_run_id: str, output_key: str):
+        cached_path = None
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
             if sample_row is None:
                 raise HTTPException(status_code=404, detail="Sample not found")
+            if is_cacheable_output(config, output_key):
+                cached_path = get_cached_output_file(config, connection, sample_run_id, output_key)
         finally:
             connection.close()
 
+        outputs = effective_outputs(config, sample_row)
+        if cached_path is not None:
+            return FileResponse(cached_path, filename=outputs.get(output_key) or cached_path.name)
         file_path, relname = resolve_output_file(config, sample_row, output_key)
         return FileResponse(file_path, filename=relname)
 

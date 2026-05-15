@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from virtitta.artifact_cache import cache_sample_outputs
 from virtitta.config import Config, ResultsRoot
 from virtitta.repository import connect, init_db, sync_run_sample_count, upsert_run, upsert_sample, utc_now
 
@@ -253,14 +254,16 @@ def import_run(config: Config, run_dir: Path, clarity_sample_info_path: Path | N
         root_path = root.linux_path.resolve()
         for sample, qc_summary_path in records:
             sample_results_relpath = qc_summary_path.parent.resolve().relative_to(root_path)
+            sample_record = _flatten_sample_record(
+                sample,
+                root_name=root.name,
+                sample_results_relpath=sample_results_relpath,
+            )
             upsert_sample(
                 connection,
-                _flatten_sample_record(
-                    sample,
-                    root_name=root.name,
-                    sample_results_relpath=sample_results_relpath,
-                ),
+                sample_record,
             )
+            cache_sample_outputs(config, connection, sample_record)
             imported += 1
 
         sync_run_sample_count(connection, run_name)

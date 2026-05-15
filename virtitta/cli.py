@@ -58,6 +58,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_config_argument(backfill_af_counts)
 
+    verify_cache = subparsers.add_parser("verify-cache", help="Verify cached output artifacts against remote files")
+    add_config_argument(verify_cache)
+    verify_target = verify_cache.add_mutually_exclusive_group(required=True)
+    verify_target.add_argument("--sample-run-id", default="", help="Verify one sample")
+    verify_target.add_argument("--run-name", default="", help="Verify all samples in one run")
+    verify_target.add_argument("--all-runs", action="store_true", help="Verify all imported runs except manual_failed_samples")
+    verify_cache.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Rebuild configured cache entries from remote files before verification",
+    )
+
     serve = subparsers.add_parser("serve", help="Run the FastAPI development server")
     add_config_argument(serve)
     serve.add_argument("--host", default=None, help="Override host from config")
@@ -71,9 +83,17 @@ def main() -> None:
     args = parser.parse_args()
 
     from virtitta.app import create_app
+    from virtitta.artifact_cache import CACHE_OK, cache_sample_outputs, verify_sample_cache
     from virtitta.config import load_config
     from virtitta.importer import import_all_roots, import_run, import_sample
-    from virtitta.repository import backfill_variant_af_counts, connect, init_db
+    from virtitta.repository import (
+        backfill_variant_af_counts,
+        connect,
+        get_sample,
+        get_samples_by_run,
+        init_db,
+        list_samples_for_cache_verification,
+    )
 
     config = load_config(args.config or "virtitta.toml")
 
@@ -121,6 +141,50 @@ def main() -> None:
         finally:
             connection.close()
         print(f"Backfilled AF counts for {updated} sample(s)")
+        return
+
+    if args.command == "verify-cache":
+        connection = connect(config.database.path)
+        try:
+            init_db(connection)
+            if args.sample_run_id:
+                sample = get_sample(connection, args.sample_run_id)
+                sample_rows = [sample] if sample is not None else []
+            elif args.run_name:
+                sample_rows = get_samples_by_run(connection, args.run_name)
+            else:
+                sample_rows = list_samples_for_cache_verification(connection, all_runs=True)
+
+            if args.refresh:
+                for sample_row in sample_rows:
+                    cache_sample_outputs(config, connection, sample_row)
+                connection.commit()
+
+            results = []
+            for sample_row in sample_rows:
+                results.extend(verify_sample_cache(config, connection, sample_row))
+        finally:
+            connection.close()
+
+        if not sample_rows:
+            print("No matching samples found")
+            raise SystemExit(1)
+
+        for item in results:
+            print(
+                "\t".join(
+                    [
+                        item["status"],
+                        item["run_name"],
+                        item["sample_run_id"],
+                        item["output_key"],
+                    ]
+                )
+            )
+        failed = [item for item in results if item["status"] != CACHE_OK]
+        print(f"Verified {len(results)} cached artifact(s); {len(failed)} issue(s).")
+        if failed:
+            raise SystemExit(1)
         return
 
     if args.command == "serve":

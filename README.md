@@ -35,6 +35,8 @@ Important settings:
   - where the SQLite database is stored
 - `exports.lims_root`
   - optional server-side export root for LIMS files
+- `cache.outputs_root` and `cache.output_keys`
+  - local cache for small post-import artifacts such as clipboard FASTA files and the rug/KDE image
 - `results_roots`
   - one or more result roots that contain imported `virpipa` runs
 - `igv.base_url`
@@ -182,6 +184,13 @@ If flattened AF count columns were added after samples were already imported, ba
 PYTHONPATH=$PWD python -m virtitta.cli backfill-af-counts --config virtitta.toml
 ```
 
+To verify the local output cache against the current remote files for all imported runs, excluding manually added
+failed samples:
+
+```bash
+PYTHONPATH=$PWD python -m virtitta.cli verify-cache --config virtitta.toml --all-runs
+```
+
 ## Basic Workflow
 
 Typical use:
@@ -266,6 +275,7 @@ Save location behavior:
   - the currently visible main table
   - selected export FASTA records
   - selected 15% IUPAC FASTA records
+- the two FASTA clipboard exports and the rug/KDE image are served from the local output cache when present
 
 ## Next Work
 

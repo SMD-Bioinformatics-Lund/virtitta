@@ -87,6 +87,7 @@ DEFAULT_HIGHLIGHT_RULES = {
 }
 
 QC_STATUS_OPTIONS = ["unreviewed", "pass", "fail"]
+DEFAULT_CACHE_OUTPUT_KEYS = ["export_fasta", "export_iupac_fasta", "display_rug_kde_plot"]
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,12 @@ class ExportSettings:
 
 
 @dataclass(frozen=True)
+class CacheSettings:
+    outputs_root: Path
+    output_keys: list[str] = field(default_factory=lambda: list(DEFAULT_CACHE_OUTPUT_KEYS))
+
+
+@dataclass(frozen=True)
 class UiSettings:
     table_columns: list[str] = field(default_factory=lambda: list(DEFAULT_TABLE_COLUMNS))
     visible_columns: list[str] = field(default_factory=lambda: list(DEFAULT_VISIBLE_COLUMNS))
@@ -151,6 +158,7 @@ class Config:
     features: FeatureSettings
     annotations: AnnotationSettings
     exports: ExportSettings
+    cache: CacheSettings
     ui: UiSettings
     results_roots: list[ResultsRoot]
 
@@ -230,6 +238,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
     features_raw = raw.get("features", {})
     annotations_raw = raw.get("annotations", {})
     exports_raw = raw.get("exports", {})
+    cache_raw = raw.get("cache", {})
     ui_raw = raw.get("ui", {})
     root_entries = raw.get("results_roots", [])
 
@@ -277,6 +286,12 @@ def load_config(config_path: str | Path | None = None) -> Config:
             )
             if exports_raw.get("lims_root")
             else None
+        ),
+        cache=CacheSettings(
+            outputs_root=(base_dir / cache_raw.get("outputs_root", "data/output_cache")).resolve()
+            if not Path(cache_raw.get("outputs_root", "data/output_cache")).is_absolute()
+            else Path(cache_raw.get("outputs_root", "data/output_cache")),
+            output_keys=_normalize_string_list(cache_raw.get("output_keys", DEFAULT_CACHE_OUTPUT_KEYS)),
         ),
         ui=UiSettings(
             table_columns=table_columns,

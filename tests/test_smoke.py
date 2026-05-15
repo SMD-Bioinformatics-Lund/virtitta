@@ -26,19 +26,22 @@ from virtitta.app import (
     override_comment_text,
     table_columns,
 )
+from virtitta.artifact_cache import CACHE_OK, CACHE_STALE, verify_sample_cache
 from virtitta.cli import build_parser
 from virtitta.config import load_config
-from virtitta.importer import import_run, import_sample
+from virtitta.importer import MANUAL_FAILED_RUN_NAME, import_run, import_sample
 from virtitta.repository import (
     add_comment,
     add_samples_to_group,
     backfill_variant_af_counts,
     connect,
     get_comments,
+    get_output_cache_entry,
     get_sample,
     init_db,
     list_manual_groups,
     list_runs,
+    list_samples_for_cache_verification,
     list_samples,
     list_stored_sample_categories,
     remove_samples_from_group,
@@ -136,6 +139,10 @@ class VirtittaSmokeTests(unittest.TestCase):
         (self.sample_dir / "lid" / "LID001-2limsrs.txt").write_text(
             "sample_id\tparameter_name\tparameter_value\tcomment\n"
             "LID001\thcvtyp\tHCV genotyp 3a\t\n",
+            encoding="utf-8",
+        )
+        (self.sample_dir / "lid" / "LID001_rug_kde_plot.png").write_text(
+            "cached image",
             encoding="utf-8",
         )
         (self.sample_dir / "lid" / "LID001.fasta").write_text(
@@ -677,6 +684,22 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(args.command, "backfill-af-counts")
         self.assertEqual(args.config, "virtitta.toml")
 
+    def test_cli_parser_accepts_verify_cache_all_runs(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "verify-cache",
+                "--config",
+                "virtitta.toml",
+                "--all-runs",
+                "--refresh",
+            ]
+        )
+
+        self.assertEqual(args.command, "verify-cache")
+        self.assertEqual(args.config, "virtitta.toml")
+        self.assertTrue(args.all_runs)
+        self.assertTrue(args.refresh)
+
     def test_load_config_reads_annotation_categories_and_default_category_column(self) -> None:
         config = load_config(self.config_path)
         self.assertEqual(config.annotations.sample_categories, ["production", "validation", "EQA"])
@@ -689,6 +712,11 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(config.ui.column_labels["variant_af_count_03"], "af 0.3")
         self.assertEqual(config.ui.column_labels["variant_af_count_04"], "af 0.4")
         self.assertEqual(config.ui.column_max_widths, {})
+        self.assertEqual(
+            config.cache.output_keys,
+            ["export_fasta", "export_iupac_fasta", "display_rug_kde_plot"],
+        )
+        self.assertEqual(config.cache.outputs_root, self.tmp_path / "data" / "output_cache")
         self.assertIn("qc_coverage_1000x_pct", config.ui.table_columns)
         self.assertIn("variant_af_count_005", config.ui.table_columns)
         self.assertEqual(table_columns(config), config.ui.table_columns)
@@ -1437,6 +1465,124 @@ class VirtittaSmokeTests(unittest.TestCase):
             build_fasta_clipboard_content(config, [sample], "export_iupac_fasta"),
             ">LID001-0.15-iupac\nARYT\n",
         )
+
+    def test_import_run_caches_configured_outputs(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            entries = [
+                get_output_cache_entry(conn, "SAMPLE001_fixture_run", output_key)
+                for output_key in config.cache.output_keys
+            ]
+        finally:
+            conn.close()
+
+        self.assertTrue(all(entry is not None for entry in entries))
+        for entry in entries:
+            assert entry is not None
+            cache_path = config.cache.outputs_root / entry["cached_relpath"]
+            self.assertTrue(cache_path.is_file())
+        self.assertEqual(
+            (config.cache.outputs_root / entries[0]["cached_relpath"]).read_text(encoding="utf-8"),
+            ">LID001\nACGT\n",
+        )
+
+    def test_fasta_clipboard_content_reads_cached_output(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        (self.sample_dir / "lid" / "LID001.fasta").write_text(">REMOTE\nTTTT\n", encoding="utf-8")
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        assert sample is not None
+        self.assertEqual(
+            build_fasta_clipboard_content(config, [sample], "export_fasta"),
+            ">LID001\nACGT\n",
+        )
+
+    def test_reimport_replaces_cached_output_path_without_leaving_old_file(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            old_entry = get_output_cache_entry(conn, "SAMPLE001_fixture_run", "export_fasta")
+        finally:
+            conn.close()
+        assert old_entry is not None
+        old_cache_path = config.cache.outputs_root / old_entry["cached_relpath"]
+        self.assertTrue(old_cache_path.is_file())
+
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        updated = fixture[0]
+        updated["generated_at_utc"] = "2026-04-08T09:12:34Z"
+        updated["outputs"] = dict(updated["outputs"])
+        updated["outputs"]["export_fasta"] = "lid/LID001-v2.fasta"
+        self.write_run_summaries([updated])
+        (self.sample_dir / "lid" / "LID001-v2.fasta").write_text(">LID001\nTGCA\n", encoding="utf-8")
+
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            new_entry = get_output_cache_entry(conn, "SAMPLE001_fixture_run", "export_fasta")
+        finally:
+            conn.close()
+
+        assert new_entry is not None
+        self.assertFalse(old_cache_path.exists())
+        self.assertEqual(new_entry["remote_relpath"], "lid/LID001-v2.fasta")
+        self.assertEqual(
+            (config.cache.outputs_root / new_entry["cached_relpath"]).read_text(encoding="utf-8"),
+            ">LID001\nTGCA\n",
+        )
+
+    def test_sample_file_serves_cached_kde_image(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        (self.sample_dir / "lid" / "LID001_rug_kde_plot.png").unlink()
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/files/{output_key}")
+        response = route.endpoint("SAMPLE001_fixture_run", "display_rug_kde_plot")
+
+        self.assertEqual(
+            Path(response.path).read_text(encoding="utf-8"),
+            "cached image",
+        )
+
+    def test_verify_cache_detects_stale_remote_output(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        (self.sample_dir / "lid" / "LID001.fasta").write_text(">LID001\nTGCA\n", encoding="utf-8")
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+            assert sample is not None
+            results = verify_sample_cache(config, conn, sample)
+        finally:
+            conn.close()
+
+        statuses = {item["output_key"]: item["status"] for item in results}
+        self.assertEqual(statuses["export_fasta"], CACHE_STALE)
+        self.assertEqual(statuses["export_iupac_fasta"], CACHE_OK)
+
+    def test_all_run_cache_verification_rows_skip_manual_failed_samples(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        import_sample(config, "FAILED001", "LIDFAILED")
+        conn = connect(config.database.path)
+        try:
+            rows = list_samples_for_cache_verification(conn, all_runs=True)
+        finally:
+            conn.close()
+
+        self.assertEqual([row["sample_run_id"] for row in rows], ["SAMPLE001_fixture_run"])
+        self.assertNotIn(MANUAL_FAILED_RUN_NAME, {row["run_name"] for row in rows})
 
     def test_lims_export_is_written_to_server_export_root(self) -> None:
         config = load_config(self.config_path)

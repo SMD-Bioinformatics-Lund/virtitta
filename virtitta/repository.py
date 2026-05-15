@@ -269,12 +269,26 @@ def init_db(connection: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS output_cache (
+            sample_run_id TEXT NOT NULL REFERENCES samples(sample_run_id) ON DELETE CASCADE,
+            output_key TEXT NOT NULL,
+            remote_relpath TEXT NOT NULL,
+            cached_relpath TEXT NOT NULL,
+            remote_size INTEGER NOT NULL,
+            remote_mtime_ns INTEGER NOT NULL,
+            cached_sha256 TEXT NOT NULL,
+            cached_at TEXT NOT NULL,
+            verified_at TEXT,
+            PRIMARY KEY (sample_run_id, output_key)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_samples_run_name ON samples(run_name);
         CREATE INDEX IF NOT EXISTS idx_samples_sample_id ON samples(sample_id);
         CREATE INDEX IF NOT EXISTS idx_samples_lid ON samples(lid);
         CREATE INDEX IF NOT EXISTS idx_annotations_sample_category ON sample_annotations(sample_category);
         CREATE INDEX IF NOT EXISTS idx_group_memberships_group_name ON sample_group_memberships(group_name);
         CREATE INDEX IF NOT EXISTS idx_comments_sample_run_id ON sample_comments(sample_run_id);
+        CREATE INDEX IF NOT EXISTS idx_output_cache_output_key ON output_cache(output_key);
         """
     )
     _ensure_column(connection, "samples", "sequencing_date", "TEXT")
@@ -666,6 +680,114 @@ def get_sample(connection: sqlite3.Connection, sample_run_id: str) -> dict | Non
     ).fetchone()
     sample = _row_to_dict(row)
     return _apply_sample_overrides(sample, get_sample_field_overrides(connection, sample_run_id))
+
+
+def get_samples_by_run(connection: sqlite3.Connection, run_name: str) -> list[dict]:
+    rows = [
+        _row_to_dict(row)
+        for row in connection.execute(
+            """
+            SELECT
+                s.*,
+                COALESCE(r.qc_status, 'unreviewed') AS qc_status,
+                a.sample_category AS sample_category
+            FROM samples s
+            LEFT JOIN sample_review r ON r.sample_run_id = s.sample_run_id
+            LEFT JOIN sample_annotations a ON a.sample_run_id = s.sample_run_id
+            WHERE s.run_name = ?
+            ORDER BY s.sample_run_id ASC
+            """,
+            (run_name,),
+        ).fetchall()
+    ]
+    overrides = _sample_field_overrides_for_rows(connection, [row["sample_run_id"] for row in rows])
+    for row in rows:
+        _apply_sample_overrides(row, overrides.get(row["sample_run_id"]))
+    return rows
+
+
+def list_samples_for_cache_verification(connection: sqlite3.Connection, *, all_runs: bool = False) -> list[dict]:
+    where_sql = "WHERE s.run_name != 'manual_failed_samples'" if all_runs else ""
+    rows = [
+        _row_to_dict(row)
+        for row in connection.execute(
+            f"""
+            SELECT
+                s.*,
+                COALESCE(r.qc_status, 'unreviewed') AS qc_status,
+                a.sample_category AS sample_category
+            FROM samples s
+            LEFT JOIN sample_review r ON r.sample_run_id = s.sample_run_id
+            LEFT JOIN sample_annotations a ON a.sample_run_id = s.sample_run_id
+            {where_sql}
+            ORDER BY s.run_name DESC, s.sample_run_id ASC
+            """
+        ).fetchall()
+    ]
+    overrides = _sample_field_overrides_for_rows(connection, [row["sample_run_id"] for row in rows])
+    for row in rows:
+        _apply_sample_overrides(row, overrides.get(row["sample_run_id"]))
+    return rows
+
+
+def get_output_cache_entry(connection: sqlite3.Connection, sample_run_id: str, output_key: str) -> dict | None:
+    row = connection.execute(
+        """
+        SELECT sample_run_id, output_key, remote_relpath, cached_relpath, remote_size,
+               remote_mtime_ns, cached_sha256, cached_at, verified_at
+        FROM output_cache
+        WHERE sample_run_id = ? AND output_key = ?
+        """,
+        (sample_run_id, output_key),
+    ).fetchone()
+    return _row_to_dict(row)
+
+
+def upsert_output_cache_entry(connection: sqlite3.Connection, entry: dict) -> None:
+    connection.execute(
+        """
+        INSERT INTO output_cache (
+            sample_run_id, output_key, remote_relpath, cached_relpath, remote_size,
+            remote_mtime_ns, cached_sha256, cached_at, verified_at
+        )
+        VALUES (
+            :sample_run_id, :output_key, :remote_relpath, :cached_relpath, :remote_size,
+            :remote_mtime_ns, :cached_sha256, :cached_at, :verified_at
+        )
+        ON CONFLICT(sample_run_id, output_key) DO UPDATE SET
+            remote_relpath = excluded.remote_relpath,
+            cached_relpath = excluded.cached_relpath,
+            remote_size = excluded.remote_size,
+            remote_mtime_ns = excluded.remote_mtime_ns,
+            cached_sha256 = excluded.cached_sha256,
+            cached_at = excluded.cached_at,
+            verified_at = excluded.verified_at
+        """,
+        entry,
+    )
+
+
+def delete_output_cache_entry(connection: sqlite3.Connection, sample_run_id: str, output_key: str) -> None:
+    connection.execute(
+        "DELETE FROM output_cache WHERE sample_run_id = ? AND output_key = ?",
+        (sample_run_id, output_key),
+    )
+
+
+def update_output_cache_verified_at(
+    connection: sqlite3.Connection,
+    sample_run_id: str,
+    output_key: str,
+    verified_at: str,
+) -> None:
+    connection.execute(
+        """
+        UPDATE output_cache
+        SET verified_at = ?
+        WHERE sample_run_id = ? AND output_key = ?
+        """,
+        (verified_at, sample_run_id, output_key),
+    )
 
 
 def get_run(connection: sqlite3.Connection, run_name: str) -> dict | None:
