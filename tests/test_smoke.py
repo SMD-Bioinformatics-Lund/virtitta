@@ -842,6 +842,11 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn('id="table-search-input"', rendered)
         self.assertIn('id="select-visible-samples"', rendered)
         self.assertIn('aria-label="Select visible samples"', rendered)
+        self.assertIn('data-selected-only', rendered)
+        self.assertIn('data-selected-count>Selected 0', rendered)
+        self.assertIn("virtitta.selectedSampleIds.v1", rendered)
+        self.assertIn("applyTableViewFilter", rendered)
+        self.assertIn("addHiddenInputsForFilteredSelection", rendered)
 
     def test_index_route_renders_annotation_filters_and_optional_groups_column_toggle(self) -> None:
         config = load_config(self.config_path)

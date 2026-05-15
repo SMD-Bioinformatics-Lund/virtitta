@@ -64,7 +64,7 @@
       Desc
     </label>
     <button type="submit">Apply</button>
-    <a class="button-link secondary" href="{{ request.url_for('index') }}">Reset</a>
+    <a class="button-link secondary" href="{{ request.url_for('index') }}" data-selection-reset>Reset</a>
   </form>
 </section>
 
@@ -75,6 +75,7 @@
       <span class="summary-pill summary-unreviewed">Unreviewed {{ summary.unreviewed }}</span>
       <span class="summary-pill summary-pass">Pass {{ summary.pass }}</span>
       <span class="summary-pill summary-fail">Fail {{ summary.fail }}</span>
+      <span class="summary-pill summary-selected" data-selected-count>Selected 0</span>
       {% if selected_run_name %}
       <form method="post" action="{{ request.url_for('refresh_run_metadata', run_name=selected_run_name) }}" class="inline-form">
         <input type="hidden" name="redirect_to" value="{{ request.url }}">
@@ -107,6 +108,10 @@
     <div class="bulkbar">
       <button type="button" class="secondary" data-select-all>Select all</button>
       <button type="button" class="secondary" data-select-none>Clear</button>
+      <label class="checkbox-inline">
+        <input type="checkbox" data-selected-only>
+        Selected only
+      </label>
       <button type="submit" name="qc_status" value="pass">Mark pass</button>
       <button type="submit" name="qc_status" value="fail">Mark fail</button>
       <button type="submit" name="qc_status" value="unreviewed" class="secondary">Reset QC</button>
@@ -287,9 +292,13 @@ const clipboardModalText = document.getElementById('clipboard-modal-text');
 const selectVisibleCheckbox = document.getElementById('select-visible-samples');
 const tableSearchInput = document.getElementById('table-search-input');
 const sampleCount = document.querySelector('[data-sample-count]');
+const selectedCountIndicator = document.querySelector('[data-selected-count]');
+const selectedOnlyToggle = document.querySelector('[data-selected-only]');
 const clientEmptyState = document.getElementById('client-empty-state');
 const filterForm = document.querySelector('[data-filter-form]');
 const columnVisibilityStorageKey = {{ column_visibility_storage_key|tojson }};
+const selectionStorageKey = 'virtitta.selectedSampleIds.v1';
+let suppressSelectionSave = false;
 
 function showClientNotice(message, isError = false) {
   clientNotice.textContent = message;
@@ -311,10 +320,6 @@ function hideClipboardModal() {
   clipboardModal.hidden = true;
 }
 
-function selectedSampleIds() {
-  return Array.from(document.querySelectorAll('input[type="checkbox"][name="sample_run_id"]:checked')).map(box => box.value);
-}
-
 function sampleRows() {
   return Array.from(document.querySelectorAll('.js-sample-row'));
 }
@@ -324,6 +329,86 @@ function visibleSampleCheckboxes() {
     .filter(row => !row.hidden)
     .map(row => row.querySelector('input[type="checkbox"][name="sample_run_id"]'))
     .filter(box => box);
+}
+
+function sampleCheckboxes() {
+  return Array.from(document.querySelectorAll('input[type="checkbox"][name="sample_run_id"]'));
+}
+
+function readSavedSelection() {
+  try {
+    const raw = window.sessionStorage.getItem(selectionStorageKey);
+    const values = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(values) ? values : []);
+  } catch (error) {
+    return new Set();
+  }
+}
+
+function saveSelection(ids) {
+  try {
+    if (!ids.size) {
+      window.sessionStorage.removeItem(selectionStorageKey);
+      return;
+    }
+    window.sessionStorage.setItem(selectionStorageKey, JSON.stringify(Array.from(ids).sort()));
+  } catch (error) {
+  }
+}
+
+function clearSavedSelection() {
+  try {
+    window.sessionStorage.removeItem(selectionStorageKey);
+  } catch (error) {
+  }
+}
+
+function isReloadNavigation() {
+  const navigation = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+  if (navigation) {
+    return navigation.type === 'reload';
+  }
+  return performance.navigation && performance.navigation.type === 1;
+}
+
+function currentSelectedIdSet() {
+  const ids = readSavedSelection();
+  for (const box of sampleCheckboxes()) {
+    if (box.checked) {
+      ids.add(box.value);
+    } else {
+      ids.delete(box.value);
+    }
+  }
+  return ids;
+}
+
+function selectedSampleIds() {
+  return Array.from(currentSelectedIdSet()).sort();
+}
+
+function updateSelectedCount() {
+  if (!selectedCountIndicator) {
+    return;
+  }
+  selectedCountIndicator.textContent = `Selected ${currentSelectedIdSet().size}`;
+}
+
+function syncSavedSelectionFromDom() {
+  saveSelection(currentSelectedIdSet());
+  updateSelectedCount();
+}
+
+function restoreSavedSelection() {
+  if (isReloadNavigation()) {
+    clearSavedSelection();
+    return;
+  }
+  const ids = readSavedSelection();
+  for (const box of sampleCheckboxes()) {
+    box.checked = ids.has(box.value);
+  }
+  updateSelectedCount();
 }
 
 function rowSearchText(row) {
@@ -358,14 +443,15 @@ function updateClientEmptyState() {
   clientEmptyState.hidden = sampleRows().some(row => !row.hidden);
 }
 
-function applyTableSearchFilter() {
-  if (!tableSearchInput) {
-    return;
-  }
-
-  const query = tableSearchInput.value.toLowerCase().trim().replace(/\s+/g, ' ');
+function applyTableViewFilter() {
+  const query = tableSearchInput ? tableSearchInput.value.toLowerCase().trim().replace(/\s+/g, ' ') : '';
+  const selectedOnly = selectedOnlyToggle && selectedOnlyToggle.checked;
+  const selectedIds = selectedOnly ? currentSelectedIdSet() : new Set();
   for (const row of sampleRows()) {
-    const matches = !query || rowSearchText(row).includes(query);
+    const checkbox = row.querySelector('input[type="checkbox"][name="sample_run_id"]');
+    const matchesSearch = !query || rowSearchText(row).includes(query);
+    const matchesSelection = !selectedOnly || (checkbox && selectedIds.has(checkbox.value));
+    const matches = matchesSearch && matchesSelection;
     row.hidden = !matches;
   }
 
@@ -376,6 +462,7 @@ function applyTableSearchFilter() {
 
 function syncSelectVisibleCheckbox() {
   if (!selectVisibleCheckbox) {
+    updateSelectedCount();
     return;
   }
   const checkboxes = visibleSampleCheckboxes();
@@ -384,13 +471,39 @@ function syncSelectVisibleCheckbox() {
 
   selectVisibleCheckbox.indeterminate = selectedCount > 0 && selectedCount < totalCount;
   selectVisibleCheckbox.checked = totalCount > 0 && selectedCount === totalCount;
+  updateSelectedCount();
 }
 
 function setVisibleSampleSelection(checked) {
   for (const box of visibleSampleCheckboxes()) {
     box.checked = checked;
   }
-  syncSelectVisibleCheckbox();
+  syncSavedSelectionFromDom();
+  applyTableViewFilter();
+}
+
+function clearAllSampleSelection() {
+  for (const box of sampleCheckboxes()) {
+    box.checked = false;
+  }
+  clearSavedSelection();
+  applyTableViewFilter();
+}
+
+function addHiddenInputsForFilteredSelection(form) {
+  form.querySelectorAll('input[data-sticky-selection]').forEach(input => input.remove());
+  const renderedIds = new Set(sampleCheckboxes().map(box => box.value));
+  for (const id of selectedSampleIds()) {
+    if (renderedIds.has(id)) {
+      continue;
+    }
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'sample_run_id';
+    input.value = id;
+    input.dataset.stickySelection = 'true';
+    form.appendChild(input);
+  }
 }
 
 function columnToggles() {
@@ -522,11 +635,17 @@ function tableTextFromVisibleColumns() {
   return rows.join('\n') + '\n';
 }
 
+restoreSavedSelection();
+
 if (tableSearchInput) {
-  tableSearchInput.addEventListener('input', applyTableSearchFilter);
-  applyTableSearchFilter();
+  tableSearchInput.addEventListener('input', applyTableViewFilter);
 } else {
   updateSampleCount();
+}
+applyTableViewFilter();
+
+if (selectedOnlyToggle) {
+  selectedOnlyToggle.addEventListener('change', applyTableViewFilter);
 }
 
 if (filterForm) {
@@ -548,8 +667,11 @@ if (selectVisibleCheckbox) {
   });
 }
 
-for (const checkbox of visibleSampleCheckboxes()) {
-  checkbox.addEventListener('change', syncSelectVisibleCheckbox);
+for (const checkbox of sampleCheckboxes()) {
+  checkbox.addEventListener('change', () => {
+    syncSavedSelectionFromDom();
+    applyTableViewFilter();
+  });
 }
 
 for (const button of document.querySelectorAll('[data-select-all]')) {
@@ -559,9 +681,29 @@ for (const button of document.querySelectorAll('[data-select-all]')) {
 }
 for (const button of document.querySelectorAll('[data-select-none]')) {
   button.addEventListener('click', () => {
-    setVisibleSampleSelection(false);
+    clearAllSampleSelection();
   });
 }
+
+for (const resetLink of document.querySelectorAll('[data-selection-reset]')) {
+  resetLink.addEventListener('click', () => {
+    suppressSelectionSave = true;
+    clearAllSampleSelection();
+  });
+}
+
+if (bulkForm) {
+  bulkForm.addEventListener('submit', () => {
+    syncSavedSelectionFromDom();
+    addHiddenInputsForFilteredSelection(bulkForm);
+  });
+}
+
+window.addEventListener('beforeunload', () => {
+  if (!suppressSelectionSave) {
+    syncSavedSelectionFromDom();
+  }
+});
 
 applySavedColumnVisibility();
 
