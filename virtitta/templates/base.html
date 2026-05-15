@@ -18,23 +18,51 @@
         <div class="subtitle">VirPipa run review</div>
       </div>
     </div>
+    {% set initial_toast_message = warning_message or notice_message %}
+    {% set initial_toast_is_error = warning_message %}
+    <div class="toast-region" aria-live="polite" aria-atomic="true">
+      <section id="app-toast" class="app-toast {% if initial_toast_is_error %}warning-banner{% else %}notice-banner{% endif %}" role="{% if initial_toast_is_error %}alert{% else %}status{% endif %}" {% if not initial_toast_message %}hidden{% endif %}>
+        <span id="app-toast-message">{{ initial_toast_message }}</span>
+        <button type="button" id="app-toast-close" class="toast-close" aria-label="Dismiss notification">&times;</button>
+      </section>
+    </div>
     <nav class="topnav">
       <a href="{{ request.url_for('index') }}">Samples</a>
     </nav>
   </header>
   <main class="layout">
-    {% if warning_message %}
-    <section class="panel warning-banner" data-flash-message>{{ warning_message }}</section>
-    {% endif %}
-    {% if notice_message %}
-    <section class="panel notice-banner" data-flash-message>{{ notice_message }}</section>
-    {% endif %}
     {% block content %}{% endblock %}
   </main>
   <script>
-  const flashMessages = Array.from(document.querySelectorAll('[data-flash-message]'));
+  const appToast = document.getElementById('app-toast');
+  const appToastMessage = document.getElementById('app-toast-message');
+  const appToastClose = document.getElementById('app-toast-close');
+  let appToastTimer = null;
 
-  if (flashMessages.length) {
+  function hideAppToast() {
+    window.clearTimeout(appToastTimer);
+    appToastTimer = null;
+    appToast.hidden = true;
+  }
+
+  window.showAppToast = function(message, isError = false) {
+    window.clearTimeout(appToastTimer);
+    appToastMessage.textContent = message;
+    appToast.hidden = false;
+    appToast.classList.toggle('warning-banner', isError);
+    appToast.classList.toggle('notice-banner', !isError);
+    appToast.setAttribute('role', isError ? 'alert' : 'status');
+    appToastTimer = window.setTimeout(hideAppToast, isError ? 8000 : 4500);
+  };
+
+  appToastClose.addEventListener('click', hideAppToast);
+
+  const initialToasts = [
+    {% if notice_message %}{ message: {{ notice_message|tojson }}, isError: false },{% endif %}
+    {% if warning_message %}{ message: {{ warning_message|tojson }}, isError: true },{% endif %}
+  ];
+
+  if (initialToasts.length) {
     const url = new URL(window.location.href);
     let changed = false;
 
@@ -49,11 +77,9 @@
       window.history.replaceState({}, '', url.toString());
     }
 
-    window.setTimeout(() => {
-      for (const message of flashMessages) {
-        message.remove();
-      }
-    }, 4500);
+    for (const item of initialToasts) {
+      window.showAppToast(item.message, item.isError);
+    }
   }
   </script>
 </body>

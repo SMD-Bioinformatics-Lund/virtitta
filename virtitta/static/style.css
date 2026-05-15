@@ -30,6 +30,7 @@ a:hover {
 }
 
 .topbar {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: end;
@@ -91,8 +92,47 @@ a:hover {
   font-weight: 600;
 }
 
-.client-notice[hidden] {
+.toast-region {
+  position: absolute;
+  top: 50%;
+  right: 78px;
+  left: clamp(230px, 30vw, 360px);
+  transform: translateY(-50%);
+  z-index: 200;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.app-toast[hidden] {
   display: none;
+}
+
+.app-toast {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  width: min(620px, 100%);
+  max-height: 42px;
+  overflow-y: auto;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.18);
+  pointer-events: auto;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.toast-close {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0 2px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .clipboard-modal[hidden] {

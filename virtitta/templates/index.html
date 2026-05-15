@@ -267,7 +267,6 @@
   </form>
 </section>
 
-<section id="client-notice" class="panel notice-banner client-notice" hidden></section>
 <section id="clipboard-modal" class="clipboard-modal" hidden>
   <div class="clipboard-modal-panel">
     <div class="comment-head">
@@ -285,7 +284,6 @@
 
 <script>
 const bulkForm = document.querySelector('form[action="{{ request.url_for("bulk_qc_update") }}"]');
-const clientNotice = document.getElementById('client-notice');
 const clipboardModal = document.getElementById('clipboard-modal');
 const clipboardModalTitle = document.getElementById('clipboard-modal-title');
 const clipboardModalText = document.getElementById('clipboard-modal-text');
@@ -301,10 +299,7 @@ const selectionStorageKey = 'virtitta.selectedSampleIds.v1';
 let suppressSelectionSave = false;
 
 function showClientNotice(message, isError = false) {
-  clientNotice.textContent = message;
-  clientNotice.hidden = false;
-  clientNotice.classList.toggle('warning-banner', isError);
-  clientNotice.classList.toggle('notice-banner', !isError);
+  window.showAppToast(message, isError);
 }
 
 function showClipboardModal(text, title) {

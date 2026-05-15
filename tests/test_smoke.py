@@ -873,8 +873,56 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn('data-selected-only', rendered)
         self.assertIn('data-selected-count>Selected 0', rendered)
         self.assertIn("virtitta.selectedSampleIds.v1", rendered)
+        self.assertIn('id="app-toast"', rendered)
+        self.assertIn("window.showAppToast", rendered)
+        self.assertNotIn('id="client-notice"', rendered)
         self.assertIn("applyTableViewFilter", rendered)
         self.assertIn("addHiddenInputsForFilteredSelection", rendered)
+
+    def test_index_route_renders_server_messages_as_toasts(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
+
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": "/",
+                "raw_path": b"/",
+                "query_string": b"notice=Saved",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "app": app,
+                "router": app.router,
+            }
+        )
+
+        response = route.endpoint(
+            request,
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            warning="",
+            notice="Saved",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        )
+
+        rendered = response.body.decode("utf-8")
+        self.assertIn('class="toast-region"', rendered)
+        self.assertIn('{ message: "Saved", isError: false }', rendered)
+        self.assertIn("window.history.replaceState", rendered)
+        self.assertNotIn("data-flash-message", rendered)
 
     def test_index_route_renders_annotation_filters_and_optional_groups_column_toggle(self) -> None:
         config = load_config(self.config_path)
