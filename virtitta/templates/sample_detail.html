@@ -6,23 +6,35 @@
     <div class="meta-line">{{ sample["sample_id"] }} · {{ sample["run_name"] }} · {{ sample["qc_status"] }}{% if sample["sample_category"] %} · {{ sample["sample_category"] }}{% endif %}</div>
   </div>
   <div class="button-row">
+    {% if permissions.export_read %}
     {% if igv_url %}
     <a class="button-link" href="{{ igv_url }}">Launch IGV</a>
     {% endif %}
+    {% endif %}
+    {% if permissions.run_refresh %}
     <form method="post" action="{{ request.url_for('refresh_run_metadata', run_name=refresh_run_name) }}" class="inline-form">
       <input type="hidden" name="redirect_to" value="{{ request.url }}">
+      {% if config.auth.enabled %}<input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">{% endif %}
       <button type="submit" class="secondary">Refresh run</button>
     </form>
+    {% endif %}
+    {% if permissions.export_lims %}
     <a class="button-link secondary" href="{{ request.url_for('sample_lims_export', sample_run_id=sample['sample_run_id']) }}">Export LIMS</a>
+    {% endif %}
+    {% if permissions.export_read %}
     <details class="action-menu">
       <summary>Export...</summary>
       <div class="action-menu-list">
         <a class="button-link secondary" href="{{ request.url_for('sample_lims_export_download', sample_run_id=sample['sample_run_id']) }}">Browser download</a>
       </div>
     </details>
+    {% endif %}
+    {% if permissions.sample_delete %}
     <form method="post" action="{{ request.url_for('delete_single_sample', sample_run_id=sample['sample_run_id']) }}" onsubmit="return confirm('Delete this sample from the Virtitta database? This does not delete result files on disk.')" class="inline-form">
+      {% if config.auth.enabled %}<input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">{% endif %}
       <button type="submit" class="secondary">Delete sample</button>
     </form>
+    {% endif %}
     <a class="button-link secondary" href="{{ request.url_for('index') }}">Back</a>
   </div>
 </section>
@@ -30,19 +42,26 @@
 <section class="grid two-col">
   <div class="panel">
     <h3>Review</h3>
+    {% if permissions.qc_update %}
     <form method="post" action="{{ request.url_for('bulk_qc_update') }}" class="stack">
       <input type="hidden" name="sample_run_id" value="{{ sample['sample_run_id'] }}">
       <input type="hidden" name="redirect_to" value="{{ request.url }}">
+      {% if config.auth.enabled %}<input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">{% endif %}
       <label>QC status</label>
       <select name="qc_status">
         {% for status in qc_status_options %}
         <option value="{{ status }}" {% if status == sample['qc_status'] %}selected{% endif %}>{{ status }}</option>
         {% endfor %}
       </select>
+      {% if not config.auth.enabled %}
       <input type="text" name="comment_author" placeholder="QC comment author">
+      {% endif %}
       <textarea name="comment_body" rows="3" placeholder="Required when setting QC to fail. Saved as a comment if provided."></textarea>
       <button type="submit">Save QC</button>
     </form>
+    {% else %}
+    <div class="muted">QC editing is not available for your account.</div>
+    {% endif %}
     <div class="annotation-summary">
       <div><strong>Category:</strong> {{ sample["sample_category"] or "Unassigned" }}</div>
       <div><strong>Groups:</strong> {{ sample["manual_groups"] or "None" }}</div>
@@ -87,9 +106,11 @@
         <tr><th>Fragment BP</th><td>{{ format_value(sample["sample_metadata_library_fragment_length_bp"]) }}</td></tr>
       </tbody>
     </table>
+    {% if permissions.metadata_override %}
     <details class="override-editor">
       <summary>Edit metadata</summary>
       <form method="post" action="{{ request.url_for('update_sample_overrides', sample_run_id=sample['sample_run_id']) }}" class="override-grid">
+        {% if config.auth.enabled %}<input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">{% endif %}
         <label>
           LID
           <input type="text" name="lid" value="{{ sample['lid'] or '' }}">
@@ -113,23 +134,32 @@
         <button type="submit">Save metadata</button>
       </form>
     </details>
+    {% endif %}
   </div>
 
   <div class="panel" id="comments">
     <h3>Comments</h3>
+    {% if permissions.comment_add %}
     <form method="post" action="{{ request.url_for('create_comment', sample_run_id=sample['sample_run_id']) }}" class="stack">
+      {% if config.auth.enabled %}<input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">{% endif %}
+      {% if not config.auth.enabled %}
       <input type="text" name="author" placeholder="Author (optional)">
+      {% endif %}
       <textarea name="body" rows="4" placeholder="Add a comment"></textarea>
       <button type="submit">Add comment</button>
     </form>
+    {% endif %}
     <div class="comment-list">
       {% for comment in comments %}
       <article class="comment">
         <div class="comment-head">
           <div class="comment-meta">{{ comment["created_at"] }}{% if comment["author"] %} · {{ comment["author"] }}{% endif %}</div>
+          {% if permissions.comment_delete %}
           <form method="post" action="{{ request.url_for('remove_comment', sample_run_id=sample['sample_run_id'], comment_id=comment['id']) }}" onsubmit="return confirm('Delete this comment?')" class="inline-form">
+            {% if config.auth.enabled %}<input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">{% endif %}
             <button type="submit" class="mini-action secondary">Delete</button>
           </form>
+          {% endif %}
         </div>
         <div>{{ comment["body"] }}</div>
       </article>
@@ -177,7 +207,7 @@
         {% for mutation in resistance_mutations %}
         <tr>
           <td>
-            {% if mutation["locus"] %}
+            {% if mutation["locus"] and permissions.export_read %}
             <a href="{{ request.url_for('sample_igv_mutation', sample_run_id=sample['sample_run_id'], mutation_index=mutation['index']) }}">{{ mutation["mutation_label"] }}</a>
             {% else %}
             {{ mutation["mutation_label"] }}
@@ -188,7 +218,7 @@
           <td>{{ mutation["prediction"] }}</td>
           <td class="detail-wrap">{{ mutation["reference"] }}</td>
           <td>
-            {% if mutation["locus"] %}
+            {% if mutation["locus"] and permissions.export_read %}
             <a class="mini-action" href="{{ request.url_for('sample_igv_mutation', sample_run_id=sample['sample_run_id'], mutation_index=mutation['index']) }}">Goto</a>
             {% endif %}
           </td>
@@ -208,6 +238,7 @@
 <section class="grid two-col">
   <div class="panel">
     <h3>Result Files</h3>
+    {% if permissions.export_read %}
     <div class="link-grid">
       {% for link in detail_links %}
       <a class="file-link" href="{{ request.url_for('sample_file', sample_run_id=sample['sample_run_id'], output_key=link['key']) }}">
@@ -218,10 +249,14 @@
       <div class="muted">No result files exposed for this sample.</div>
       {% endfor %}
     </div>
+    {% else %}
+    <div class="muted">Result file access is not available for your account.</div>
+    {% endif %}
   </div>
 
   <div class="panel">
     <h3>IGV Track Files</h3>
+    {% if permissions.export_read %}
     <div class="link-grid">
       {% for link in igv_track_links %}
       <a class="file-link" href="{{ request.url_for('sample_file', sample_run_id=sample['sample_run_id'], output_key=link['key']) }}">
@@ -232,6 +267,9 @@
       <div class="muted">No IGV tracks available.</div>
       {% endfor %}
     </div>
+    {% else %}
+    <div class="muted">IGV file access is not available for your account.</div>
+    {% endif %}
   </div>
 </section>
 

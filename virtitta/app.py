@@ -2,16 +2,35 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from virtitta.artifact_cache import get_cached_output_file, is_cacheable_output
+from virtitta.auth import (
+    PERMISSION_CATEGORY_UPDATE,
+    PERMISSION_COMMENT_ADD,
+    PERMISSION_COMMENT_DELETE,
+    PERMISSION_EXPORT_LIMS,
+    PERMISSION_EXPORT_READ,
+    PERMISSION_GROUP_UPDATE,
+    PERMISSION_METADATA_OVERRIDE,
+    PERMISSION_QC_UPDATE,
+    PERMISSION_RUN_REFRESH,
+    PERMISSION_SAMPLE_DELETE,
+    PERMISSION_VIEW,
+    authenticate_local_user,
+    create_login_session,
+    disabled_auth_user,
+    get_user_from_cookie,
+    logout_session,
+)
 from virtitta.config import DEFAULT_COLUMN_LABELS, QC_STATUS_OPTIONS, Config, load_config
 from virtitta.repository import (
     add_comment,
@@ -606,6 +625,15 @@ def request_url_without_messages(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
 
 
+def safe_local_redirect(url: str | None, default: str = "/") -> str:
+    if not url:
+        return default
+    parts = urlsplit(url)
+    if parts.scheme or parts.netloc or not parts.path.startswith("/"):
+        return default
+    return urlunsplit(("", "", parts.path, parts.query, parts.fragment))
+
+
 def build_igv_url(config: Config, sample_row, outputs: dict | None = None) -> str:
     if not config.features.igv or not config.igv.enabled:
         raise HTTPException(status_code=404, detail="IGV integration is disabled")
@@ -678,6 +706,103 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.state.config = config
 
+    def permission_allowed(request: Request, permission: str) -> bool:
+        if not config.auth.enabled:
+            return True
+        current_user = getattr(request.state, "current_user", None)
+        return bool(current_user and current_user.can(permission))
+
+    def require_permission(request: Request, permission: str) -> None:
+        if permission_allowed(request, permission):
+            return
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    def require_csrf(request: Request, csrf_token: str) -> None:
+        if not config.auth.enabled:
+            return
+        current_user = getattr(request.state, "current_user", None)
+        if current_user is None or not current_user.authenticated:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        if not csrf_token or not secrets.compare_digest(csrf_token, current_user.csrf_token):
+            raise HTTPException(status_code=403, detail="Invalid CSRF token")
+
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next):
+        if not config.auth.enabled:
+            request.state.current_user = disabled_auth_user()
+            return await call_next(request)
+
+        request.state.current_user = get_user_from_cookie(config, request.cookies.get(config.auth.cookie_name))
+        path = request.url.path
+        is_public_path = path == "/login" or path.startswith("/static/")
+        if request.state.current_user is None and not is_public_path:
+            if request.method in {"GET", "HEAD"}:
+                next_url = request.url.path
+                if request.url.query:
+                    next_url = f"{next_url}?{request.url.query}"
+                return RedirectResponse(f"/login?{urlencode({'next': next_url})}", status_code=303)
+            return PlainTextResponse("Authentication required", status_code=401)
+
+        response = await call_next(request)
+        return response
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_form(
+        request: Request,
+        next: str = Query(default="/"),
+        warning: str = Query(default=""),
+        notice: str = Query(default=""),
+    ):
+        if not config.auth.enabled:
+            return RedirectResponse("/", status_code=303)
+        if getattr(request.state, "current_user", None) is not None:
+            return RedirectResponse(safe_local_redirect(next), status_code=303)
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "request": request,
+                "config": config,
+                "next_url": safe_local_redirect(next),
+                "warning_message": warning if isinstance(warning, str) else "",
+                "notice_message": notice if isinstance(notice, str) else "",
+            },
+        )
+
+    @app.post("/login")
+    async def login(
+        username: str = Form(default=""),
+        password: str = Form(default=""),
+        next: str = Form(default="/"),
+    ):
+        if not config.auth.enabled:
+            return RedirectResponse("/", status_code=303)
+        user = authenticate_local_user(config, username, password)
+        if user is None:
+            return RedirectResponse(
+                append_warning(f"/login?{urlencode({'next': safe_local_redirect(next)})}", "Invalid username or password."),
+                status_code=303,
+            )
+        session_token, _current_user = create_login_session(config, user["username"])
+        response = RedirectResponse(safe_local_redirect(next), status_code=303)
+        response.set_cookie(
+            config.auth.cookie_name,
+            session_token,
+            httponly=True,
+            secure=config.auth.cookie_secure,
+            samesite="lax",
+            max_age=config.auth.session_days * 24 * 60 * 60,
+        )
+        return response
+
+    @app.post("/logout")
+    async def logout(request: Request, csrf_token: str = Form(default="")):
+        require_csrf(request, csrf_token)
+        logout_session(config, request.cookies.get(config.auth.cookie_name))
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(config.auth.cookie_name)
+        return response
+
     @app.get("/", response_class=HTMLResponse)
     def index(
         request: Request,
@@ -696,6 +821,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         sort: str = Query(default=config.ui.default_sort),
         desc: bool = Query(default=config.ui.default_sort_desc),
     ):
+        require_permission(request, PERMISSION_VIEW)
         selected_sample_categories = unique_strings(sample_category)
         selected_manual_groups = unique_strings(manual_group)
         min_coverage_value = parse_optional_float(min_coverage_pct)
@@ -789,6 +915,16 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "max_ct": max_ct,
                 "warning_message": warning if isinstance(warning, str) else "",
                 "notice_message": notice if isinstance(notice, str) else "",
+                "permissions": {
+                    "category_update": permission_allowed(request, PERMISSION_CATEGORY_UPDATE),
+                    "comment_add": permission_allowed(request, PERMISSION_COMMENT_ADD),
+                    "export_lims": permission_allowed(request, PERMISSION_EXPORT_LIMS),
+                    "export_read": permission_allowed(request, PERMISSION_EXPORT_READ),
+                    "group_update": permission_allowed(request, PERMISSION_GROUP_UPDATE),
+                    "qc_update": permission_allowed(request, PERMISSION_QC_UPDATE),
+                    "run_refresh": permission_allowed(request, PERMISSION_RUN_REFRESH),
+                    "sample_delete": permission_allowed(request, PERMISSION_SAMPLE_DELETE),
+                },
                 "qc_status_options": QC_STATUS_OPTIONS,
                 "summary": {
                     "total": len(rows),
@@ -801,10 +937,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/samples/category")
     async def bulk_category_update(
+        request: Request,
         sample_run_id: list[str] = Form(default=[]),
         sample_category: str = Form(default=""),
         redirect_to: str = Form(default="/"),
+        csrf_token: str = Form(default=""),
     ):
+        require_permission(request, PERMISSION_CATEGORY_UPDATE)
+        require_csrf(request, csrf_token)
         if not sample_run_id:
             return RedirectResponse(redirect_to, status_code=303)
 
@@ -830,10 +970,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/samples/groups/add")
     async def bulk_add_group(
+        request: Request,
         sample_run_id: list[str] = Form(default=[]),
         group_name: str = Form(default=""),
         redirect_to: str = Form(default="/"),
+        csrf_token: str = Form(default=""),
     ):
+        require_permission(request, PERMISSION_GROUP_UPDATE)
+        require_csrf(request, csrf_token)
         if not sample_run_id:
             return RedirectResponse(redirect_to, status_code=303)
 
@@ -857,10 +1001,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/samples/groups/remove")
     async def bulk_remove_group(
+        request: Request,
         sample_run_id: list[str] = Form(default=[]),
         group_name: str = Form(default=""),
         redirect_to: str = Form(default="/"),
+        csrf_token: str = Form(default=""),
     ):
+        require_permission(request, PERMISSION_GROUP_UPDATE)
+        require_csrf(request, csrf_token)
         if not sample_run_id:
             return RedirectResponse(redirect_to, status_code=303)
 
@@ -884,12 +1032,16 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/samples/qc")
     async def bulk_qc_update(
+        request: Request,
         sample_run_id: list[str] = Form(default=[]),
         qc_status: str = Form(...),
         comment_body: str = Form(default=""),
         comment_author: str = Form(default=""),
         redirect_to: str = Form(default="/"),
+        csrf_token: str = Form(default=""),
     ):
+        require_permission(request, PERMISSION_QC_UPDATE)
+        require_csrf(request, csrf_token)
         if qc_status not in QC_STATUS_OPTIONS:
             raise HTTPException(status_code=400, detail=f"Invalid QC status: {qc_status}")
         if not sample_run_id:
@@ -902,19 +1054,25 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
         connection = connect(config.database.path)
         try:
-            update_qc_status(connection, sample_run_id, qc_status)
+            current_user = getattr(request.state, "current_user", None)
+            actor = current_user.display_name if config.auth.enabled and current_user is not None else None
+            update_qc_status(connection, sample_run_id, qc_status, actor)
             if comment_body.strip():
                 for item in sample_run_id:
-                    add_comment(connection, item, comment_body, comment_author or None)
+                    add_comment(connection, item, comment_body, actor or comment_author or None)
         finally:
             connection.close()
         return RedirectResponse(redirect_to, status_code=303)
 
     @app.post("/samples/delete")
     async def bulk_delete_samples(
+        request: Request,
         sample_run_id: list[str] = Form(default=[]),
         redirect_to: str = Form(default="/"),
+        csrf_token: str = Form(default=""),
     ):
+        require_permission(request, PERMISSION_SAMPLE_DELETE)
+        require_csrf(request, csrf_token)
         if not sample_run_id:
             return RedirectResponse(redirect_to, status_code=303)
 
@@ -927,9 +1085,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/samples/lims-export")
     async def bulk_lims_export(
+        request: Request,
         sample_run_id: list[str] = Form(default=[]),
         redirect_to: str = Form(default="/"),
+        csrf_token: str = Form(default=""),
     ):
+        require_permission(request, PERMISSION_EXPORT_LIMS)
+        require_csrf(request, csrf_token)
         if not sample_run_id:
             return RedirectResponse(redirect_to, status_code=303)
 
@@ -957,9 +1119,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/samples/lims-export/download")
     async def bulk_lims_export_download(
+        request: Request,
         sample_run_id: list[str] = Form(default=[]),
         redirect_to: str = Form(default="/"),
+        csrf_token: str = Form(default=""),
     ):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        require_csrf(request, csrf_token)
         if not sample_run_id:
             return RedirectResponse(redirect_to, status_code=303)
 
@@ -982,7 +1148,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         )
 
     @app.post("/samples/clipboard/fasta")
-    async def bulk_fasta_clipboard_export(sample_run_id: list[str] = Form(default=[])):
+    async def bulk_fasta_clipboard_export(
+        request: Request,
+        sample_run_id: list[str] = Form(default=[]),
+        csrf_token: str = Form(default=""),
+    ):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        require_csrf(request, csrf_token)
         if not sample_run_id:
             raise HTTPException(status_code=400, detail="No samples selected")
         sample_rows = load_sample_rows(config, sample_run_id)
@@ -994,7 +1166,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         )
 
     @app.post("/samples/clipboard/iupac-fasta")
-    async def bulk_iupac_fasta_clipboard_export(sample_run_id: list[str] = Form(default=[])):
+    async def bulk_iupac_fasta_clipboard_export(
+        request: Request,
+        sample_run_id: list[str] = Form(default=[]),
+        csrf_token: str = Form(default=""),
+    ):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        require_csrf(request, csrf_token)
         if not sample_run_id:
             raise HTTPException(status_code=400, detail="No samples selected")
         sample_rows = load_sample_rows(config, sample_run_id)
@@ -1012,6 +1190,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         warning: str = Query(default=""),
         notice: str = Query(default=""),
     ):
+        require_permission(request, PERMISSION_VIEW)
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
@@ -1053,6 +1232,16 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "resistance_has_calls": bool(resistance_summary.get("has_resistance")),
                 "warning_message": warning if isinstance(warning, str) else "",
                 "notice_message": notice if isinstance(notice, str) else "",
+                "permissions": {
+                    "comment_add": permission_allowed(request, PERMISSION_COMMENT_ADD),
+                    "comment_delete": permission_allowed(request, PERMISSION_COMMENT_DELETE),
+                    "export_lims": permission_allowed(request, PERMISSION_EXPORT_LIMS),
+                    "export_read": permission_allowed(request, PERMISSION_EXPORT_READ),
+                    "metadata_override": permission_allowed(request, PERMISSION_METADATA_OVERRIDE),
+                    "qc_update": permission_allowed(request, PERMISSION_QC_UPDATE),
+                    "run_refresh": permission_allowed(request, PERMISSION_RUN_REFRESH),
+                    "sample_delete": permission_allowed(request, PERMISSION_SAMPLE_DELETE),
+                },
                 "qc_status_options": QC_STATUS_OPTIONS,
                 "sample_categories": config.annotations.sample_categories,
                 "refresh_run_name": sample_row["run_name"],
@@ -1063,13 +1252,17 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/samples/{sample_run_id}/overrides")
     async def update_sample_overrides(
+        request: Request,
         sample_run_id: str,
         lid: str = Form(default=""),
         sequencing_date: str = Form(default=""),
         sample_metadata_ct: str = Form(default=""),
         sample_metadata_library_concentration_ng_ul: str = Form(default=""),
         typing_report_subtype: str = Form(default=""),
+        csrf_token: str = Form(default=""),
     ):
+        require_permission(request, PERMISSION_METADATA_OVERRIDE)
+        require_csrf(request, csrf_token)
         try:
             values = {
                 "lid": lid,
@@ -1091,9 +1284,11 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             sample_row = get_sample(connection, sample_run_id)
             if sample_row is None:
                 raise HTTPException(status_code=404, detail="Sample not found")
-            changes = set_sample_field_overrides(connection, sample_run_id, values)
+            current_user = getattr(request.state, "current_user", None)
+            actor = current_user.display_name if config.auth.enabled and current_user is not None else None
+            changes = set_sample_field_overrides(connection, sample_run_id, values, updated_by=actor)
             for change in changes:
-                add_comment(connection, sample_run_id, override_comment_text(change), "Virtitta")
+                add_comment(connection, sample_run_id, override_comment_text(change), actor or "Virtitta")
         finally:
             connection.close()
 
@@ -1106,21 +1301,34 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/samples/{sample_run_id}/comments")
     async def create_comment(
+        request: Request,
         sample_run_id: str,
         body: str = Form(...),
         author: str = Form(default=""),
+        csrf_token: str = Form(default=""),
     ):
+        require_permission(request, PERMISSION_COMMENT_ADD)
+        require_csrf(request, csrf_token)
         if not body.strip():
             return RedirectResponse(f"/samples/{sample_run_id}", status_code=303)
         connection = connect(config.database.path)
         try:
-            add_comment(connection, sample_run_id, body, author or None)
+            current_user = getattr(request.state, "current_user", None)
+            actor = current_user.display_name if config.auth.enabled and current_user is not None else None
+            add_comment(connection, sample_run_id, body, actor or author or None)
         finally:
             connection.close()
         return RedirectResponse(request_url_without_messages(f"/samples/{sample_run_id}"), status_code=303)
 
     @app.post("/samples/{sample_run_id}/comments/{comment_id}/delete")
-    async def remove_comment(sample_run_id: str, comment_id: int):
+    async def remove_comment(
+        request: Request,
+        sample_run_id: str,
+        comment_id: int,
+        csrf_token: str = Form(default=""),
+    ):
+        require_permission(request, PERMISSION_COMMENT_DELETE)
+        require_csrf(request, csrf_token)
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
@@ -1132,7 +1340,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return RedirectResponse(request_url_without_messages(f"/samples/{sample_run_id}#comments"), status_code=303)
 
     @app.post("/samples/{sample_run_id}/delete")
-    async def delete_single_sample(sample_run_id: str):
+    async def delete_single_sample(
+        request: Request,
+        sample_run_id: str,
+        csrf_token: str = Form(default=""),
+    ):
+        require_permission(request, PERMISSION_SAMPLE_DELETE)
+        require_csrf(request, csrf_token)
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
@@ -1145,7 +1359,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return RedirectResponse(request_url_without_messages(f"/?run_name={run_name}"), status_code=303)
 
     @app.get("/samples/{sample_run_id}/files/{output_key}")
-    def sample_file(sample_run_id: str, output_key: str):
+    def sample_file(request: Request, sample_run_id: str, output_key: str):
+        require_permission(request, PERMISSION_EXPORT_READ)
         cached_path = None
         connection = connect(config.database.path)
         try:
@@ -1164,7 +1379,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return FileResponse(file_path, filename=relname)
 
     @app.post("/runs/{run_name}/refresh")
-    async def refresh_run_metadata(run_name: str, redirect_to: str = Form(default="/")):
+    async def refresh_run_metadata(
+        request: Request,
+        run_name: str,
+        redirect_to: str = Form(default="/"),
+        csrf_token: str = Form(default=""),
+    ):
+        require_permission(request, PERMISSION_RUN_REFRESH)
+        require_csrf(request, csrf_token)
         connection = connect(config.database.path)
         try:
             run_row = get_run(connection, run_name)
@@ -1189,7 +1411,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         )
 
     @app.get("/samples/{sample_run_id}/lims-export")
-    def sample_lims_export(sample_run_id: str):
+    def sample_lims_export(request: Request, sample_run_id: str):
+        require_permission(request, PERMISSION_EXPORT_LIMS)
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
@@ -1223,7 +1446,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         )
 
     @app.get("/samples/{sample_run_id}/lims-export/download")
-    def sample_lims_export_download(sample_run_id: str):
+    def sample_lims_export_download(request: Request, sample_run_id: str):
+        require_permission(request, PERMISSION_EXPORT_READ)
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
@@ -1250,7 +1474,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         )
 
     @app.get("/samples/{sample_run_id}/igv")
-    def sample_igv(sample_run_id: str):
+    def sample_igv(request: Request, sample_run_id: str):
+        require_permission(request, PERMISSION_EXPORT_READ)
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
@@ -1262,7 +1487,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return RedirectResponse(build_igv_url(config, sample_row), status_code=307)
 
     @app.get("/samples/{sample_run_id}/igv/mutations/{mutation_index}")
-    def sample_igv_mutation(sample_run_id: str, mutation_index: int):
+    def sample_igv_mutation(request: Request, sample_run_id: str, mutation_index: int):
+        require_permission(request, PERMISSION_EXPORT_READ)
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)

@@ -28,6 +28,13 @@
     </div>
     <nav class="topnav">
       <a href="{{ request.url_for('index') }}">Samples</a>
+      {% if config.auth.enabled and request.state.current_user %}
+      <span class="topnav-user">{{ request.state.current_user.display_name }}</span>
+      <form method="post" action="{{ request.url_for('logout') }}" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">
+        <button type="submit" class="link-button">Logout</button>
+      </form>
+      {% endif %}
     </nav>
   </header>
   <main class="layout">

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 import unittest
 from pathlib import Path
@@ -27,6 +28,7 @@ from virtitta.app import (
     table_columns,
 )
 from virtitta.artifact_cache import CACHE_OK, CACHE_STALE, verify_sample_cache
+from virtitta.auth import create_login_session, hash_password
 from virtitta.cli import build_parser
 from virtitta.config import load_config
 from virtitta.importer import MANUAL_FAILED_RUN_NAME, import_run, import_sample
@@ -35,6 +37,7 @@ from virtitta.repository import (
     add_samples_to_group,
     backfill_variant_af_counts,
     connect,
+    create_auth_user,
     get_comments,
     get_output_cache_entry,
     get_sample,
@@ -91,6 +94,86 @@ def write_test_config(config_path: Path, *, root: Path, db_path: Path) -> None:
 
 
 class VirtittaSmokeTests(unittest.TestCase):
+    def make_request(self, app, *, path: str = "/", method: str = "GET", query_string: bytes = b"") -> Request:
+        return Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": method,
+                "scheme": "http",
+                "path": path,
+                "raw_path": path.encode("utf-8"),
+                "query_string": query_string,
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "app": app,
+                "router": app.router,
+            }
+        )
+
+    def make_user_request(self, app, user, *, path: str = "/", method: str = "GET") -> Request:
+        request = self.make_request(app, path=path, method=method)
+        request.state.current_user = user
+        return request
+
+    def asgi_request(self, app, *, path: str = "/", method: str = "GET") -> list[dict]:
+        messages = []
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            messages.append(message)
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode("utf-8"),
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        }
+        asyncio.run(app(scope, receive, send))
+        return messages
+
+    def enable_auth(self) -> None:
+        with self.config_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                "\n"
+                "[auth]\n"
+                "enabled = true\n"
+                'provider = "local"\n'
+                "session_days = 7\n"
+                'cookie_name = "virtitta_session"\n'
+                "cookie_secure = false\n"
+                "pbkdf2_iterations = 600000\n"
+            )
+
+    def create_local_user(self, username: str, role: str, password: str = "secret") -> None:
+        config = load_config(self.config_path)
+        conn = connect(config.database.path)
+        try:
+            init_db(conn)
+            create_auth_user(
+                conn,
+                username,
+                hash_password(password, iterations=config.auth.pbkdf2_iterations),
+                role,
+                username,
+            )
+        finally:
+            conn.close()
+
+    def login_local_user(self, username: str):
+        config = load_config(self.config_path)
+        return create_login_session(config, username)
+
     def write_sample_summary(self, sample: dict) -> None:
         sample_id = sample["sample_id"]
         summary_path = self.run_dir / sample_id / "results" / f"{sample_id}_qc_summary.json"
@@ -700,6 +783,37 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertTrue(args.all_runs)
         self.assertTrue(args.refresh)
 
+    def test_cli_parser_accepts_local_user_commands(self) -> None:
+        create_args = build_parser().parse_args(
+            [
+                "create-user",
+                "--config",
+                "virtitta.toml",
+                "--username",
+                "alice",
+                "--role",
+                "reviewer",
+                "--password",
+                "secret",
+            ]
+        )
+        role_args = build_parser().parse_args(
+            [
+                "set-user-role",
+                "--config",
+                "virtitta.toml",
+                "--username",
+                "alice",
+                "--role",
+                "viewer",
+            ]
+        )
+
+        self.assertEqual(create_args.command, "create-user")
+        self.assertEqual(create_args.role, "reviewer")
+        self.assertEqual(role_args.command, "set-user-role")
+        self.assertEqual(role_args.role, "viewer")
+
     def test_load_config_reads_annotation_categories_and_default_category_column(self) -> None:
         config = load_config(self.config_path)
         self.assertEqual(config.annotations.sample_categories, ["production", "validation", "EQA"])
@@ -717,6 +831,10 @@ class VirtittaSmokeTests(unittest.TestCase):
             ["export_fasta", "export_iupac_fasta", "display_rug_kde_plot"],
         )
         self.assertEqual(config.cache.outputs_root, self.tmp_path / "data" / "output_cache")
+        self.assertFalse(config.auth.enabled)
+        self.assertEqual(config.auth.provider, "local")
+        self.assertEqual(config.auth.session_days, 7)
+        self.assertEqual(config.auth.cookie_name, "virtitta_session")
         self.assertIn("qc_coverage_1000x_pct", config.ui.table_columns)
         self.assertIn("variant_af_count_005", config.ui.table_columns)
         self.assertEqual(table_columns(config), config.ui.table_columns)
@@ -1595,12 +1713,153 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         app = create_app(self.config_path)
         route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/files/{output_key}")
-        response = route.endpoint("SAMPLE001_fixture_run", "display_rug_kde_plot")
+        response = route.endpoint(self.make_request(app), "SAMPLE001_fixture_run", "display_rug_kde_plot")
 
         self.assertEqual(
             Path(response.path).read_text(encoding="utf-8"),
             "cached image",
         )
+
+    def test_auth_enabled_redirects_anonymous_user_to_login(self) -> None:
+        self.enable_auth()
+        app = create_app(self.config_path)
+
+        messages = self.asgi_request(app)
+        start = next(message for message in messages if message["type"] == "http.response.start")
+        headers = {key.decode("ascii"): value.decode("ascii") for key, value in start["headers"]}
+
+        self.assertEqual(start["status"], 303)
+        self.assertIn("/login?next=%2F", headers["location"])
+
+    def test_viewer_login_can_view_but_not_see_mutating_controls(self) -> None:
+        self.enable_auth()
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        self.create_local_user("viewer", "viewer")
+        app = create_app(self.config_path)
+        _token, user = self.login_local_user("viewer")
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
+
+        response = route.endpoint(
+            self.make_user_request(app, user),
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        rendered = response.body.decode("utf-8")
+        self.assertIn("viewer", rendered)
+        self.assertIn("Table to clipboard", rendered)
+        self.assertNotIn("Mark pass", rendered)
+        self.assertNotIn("Delete samples", rendered)
+        self.assertNotIn("Add group", rendered)
+
+    def test_reviewer_qc_update_requires_csrf_and_records_authenticated_author(self) -> None:
+        self.enable_auth()
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        self.create_local_user("reviewer", "reviewer")
+        app = create_app(self.config_path)
+        _token, user = self.login_local_user("reviewer")
+        detail_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}")
+        qc_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/qc")
+
+        with self.assertRaises(Exception) as blocked:
+            asyncio.run(
+                qc_route.endpoint(
+                    self.make_user_request(app, user, method="POST"),
+                    sample_run_id=["SAMPLE001_fixture_run"],
+                    qc_status="fail",
+                    comment_body="Coverage too low",
+                    redirect_to="/samples/SAMPLE001_fixture_run",
+                    csrf_token="",
+                )
+            )
+        self.assertEqual(getattr(blocked.exception, "status_code", None), 403)
+
+        page = detail_route.endpoint(self.make_user_request(app, user, path="/samples/SAMPLE001_fixture_run"), "SAMPLE001_fixture_run")
+        token = re.search(r'name="csrf_token" value="([^"]+)"', page.body.decode("utf-8"))
+        self.assertIsNotNone(token)
+        assert token is not None
+        response = asyncio.run(
+            qc_route.endpoint(
+                self.make_user_request(app, user, method="POST"),
+                sample_run_id=["SAMPLE001_fixture_run"],
+                qc_status="fail",
+                comment_body="Coverage too low",
+                redirect_to="/samples/SAMPLE001_fixture_run",
+                csrf_token=token.group(1),
+            )
+        )
+        self.assertEqual(response.status_code, 303)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+            comments = get_comments(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertEqual(sample["qc_status"], "fail")
+        self.assertEqual(comments[0]["author"], "reviewer")
+
+    def test_commenter_can_add_but_not_delete_comments(self) -> None:
+        self.enable_auth()
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        self.create_local_user("commenter", "commenter")
+        app = create_app(self.config_path)
+        _token, user = self.login_local_user("commenter")
+        detail_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}")
+        add_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/comments")
+        delete_route = next(
+            route
+            for route in app.router.routes
+            if getattr(route, "path", None) == "/samples/{sample_run_id}/comments/{comment_id}/delete"
+        )
+
+        page = detail_route.endpoint(self.make_user_request(app, user, path="/samples/SAMPLE001_fixture_run"), "SAMPLE001_fixture_run")
+        rendered = page.body.decode("utf-8")
+        self.assertIn("Add comment", rendered)
+        self.assertNotIn("Delete</button>", rendered)
+        token = re.search(r'name="csrf_token" value="([^"]+)"', rendered)
+        self.assertIsNotNone(token)
+        assert token is not None
+
+        response = asyncio.run(
+            add_route.endpoint(
+                self.make_user_request(app, user, path="/samples/SAMPLE001_fixture_run/comments", method="POST"),
+                "SAMPLE001_fixture_run",
+                body="Looks useful",
+                csrf_token=token.group(1),
+            )
+        )
+        self.assertEqual(response.status_code, 303)
+
+        conn = connect(config.database.path)
+        try:
+            comment = get_comments(conn, "SAMPLE001_fixture_run")[0]
+        finally:
+            conn.close()
+
+        with self.assertRaises(Exception) as blocked_delete:
+            asyncio.run(
+                delete_route.endpoint(
+                    self.make_user_request(app, user, method="POST"),
+                    "SAMPLE001_fixture_run",
+                    comment["id"],
+                    csrf_token=token.group(1),
+                )
+            )
+        self.assertEqual(getattr(blocked_delete.exception, "status_code", None), 403)
 
     def test_verify_cache_detects_stale_remote_output(self) -> None:
         config = load_config(self.config_path)
@@ -1689,7 +1948,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/lims-export"
         )
 
-        response = route.endpoint("SAMPLE001_fixture_run")
+        response = route.endpoint(self.make_request(app), "SAMPLE001_fixture_run")
 
         self.assertEqual(response.status_code, 303)
         self.assertIn("/samples/SAMPLE001_fixture_run", response.headers["location"])
@@ -1708,7 +1967,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         route = next(
             route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/lims-export"
         )
-        response = route.endpoint("SAMPLE001_fixture_run")
+        response = route.endpoint(self.make_request(app), "SAMPLE001_fixture_run")
 
         self.assertEqual(response.status_code, 303)
         self.assertIn("notice=", response.headers["location"])
@@ -1731,7 +1990,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         route = next(
             route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/lims-export/download"
         )
-        response = route.endpoint("SAMPLE001_fixture_run")
+        response = route.endpoint(self.make_request(app), "SAMPLE001_fixture_run")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('attachment; filename="LID001-2limsrs.txt"', response.headers["content-disposition"])
@@ -1744,6 +2003,7 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         response = asyncio.run(
             route.endpoint(
+                self.make_request(app, method="POST"),
                 sample_run_id=["SAMPLE001_fixture_run"],
                 redirect_to="/?run_name=fixture_run",
             )
@@ -1766,6 +2026,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/lims-export")
         response = asyncio.run(
             route.endpoint(
+                self.make_request(app, method="POST"),
                 sample_run_id=["SAMPLE001_fixture_run"],
                 redirect_to="/?run_name=fixture_run",
             )
@@ -1787,6 +2048,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/lims-export/download")
         response = asyncio.run(
             route.endpoint(
+                self.make_request(app, method="POST"),
                 sample_run_id=["SAMPLE001_fixture_run"],
                 redirect_to="/?run_name=fixture_run",
             )
@@ -1800,7 +2062,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         import_run(config, self.run_dir)
         app = create_app(self.config_path)
         route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/clipboard/fasta")
-        response = asyncio.run(route.endpoint(sample_run_id=["SAMPLE001_fixture_run"]))
+        response = asyncio.run(route.endpoint(self.make_request(app, method="POST"), sample_run_id=["SAMPLE001_fixture_run"]))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.body.decode("utf-8"), ">LID001\nACGT\n")
@@ -1810,7 +2072,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         import_run(config, self.run_dir)
         app = create_app(self.config_path)
         route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/clipboard/iupac-fasta")
-        response = asyncio.run(route.endpoint(sample_run_id=["SAMPLE001_fixture_run"]))
+        response = asyncio.run(route.endpoint(self.make_request(app, method="POST"), sample_run_id=["SAMPLE001_fixture_run"]))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.body.decode("utf-8"), ">LID001-0.15-iupac\nARYT\n")
@@ -1823,6 +2085,7 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         response = asyncio.run(
             route.endpoint(
+                self.make_request(app, method="POST"),
                 sample_run_id=["SAMPLE001_fixture_run"],
                 qc_status="fail",
                 comment_body="",
@@ -1842,6 +2105,7 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         response = asyncio.run(
             route.endpoint(
+                self.make_request(app, method="POST"),
                 sample_run_id=["SAMPLE001_fixture_run"],
                 qc_status="fail",
                 comment_body="Coverage too low",
@@ -1871,6 +2135,7 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         response = asyncio.run(
             route.endpoint(
+                self.make_request(app, method="POST"),
                 sample_run_id=["SAMPLE001_fixture_run"],
                 sample_category="validation",
                 redirect_to="/?run_name=fixture_run",
@@ -1887,6 +2152,7 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         asyncio.run(
             route.endpoint(
+                self.make_request(app, method="POST"),
                 sample_run_id=["SAMPLE001_fixture_run"],
                 sample_category="",
                 redirect_to="/?run_name=fixture_run",
@@ -1908,6 +2174,7 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         response = asyncio.run(
             add_route.endpoint(
+                self.make_request(app, method="POST"),
                 sample_run_id=["SAMPLE001_fixture_run"],
                 group_name="outbreak-19",
                 redirect_to="/?run_name=fixture_run",
@@ -1924,6 +2191,7 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         response = asyncio.run(
             remove_route.endpoint(
+                self.make_request(app, method="POST"),
                 sample_run_id=["SAMPLE001_fixture_run"],
                 group_name="outbreak-19",
                 redirect_to="/?run_name=fixture_run",
@@ -1990,6 +2258,7 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         response = asyncio.run(
             route.endpoint(
+                self.make_request(app, method="POST"),
                 "SAMPLE001_fixture_run",
                 lid="LIDEDIT",
                 sequencing_date="2026-02-03",
@@ -2044,7 +2313,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             if getattr(route, "path", None) == "/samples/{sample_run_id}/comments/{comment_id}/delete"
         )
 
-        response = asyncio.run(route.endpoint("SAMPLE001_fixture_run", comment_id))
+        response = asyncio.run(route.endpoint(self.make_request(app, method="POST"), "SAMPLE001_fixture_run", comment_id))
         self.assertEqual(response.status_code, 303)
 
         conn = connect(config.database.path)
@@ -2065,7 +2334,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             if getattr(route, "path", None) == "/samples/{sample_run_id}/delete"
         )
 
-        response = asyncio.run(route.endpoint("SAMPLE001_fixture_run"))
+        response = asyncio.run(route.endpoint(self.make_request(app, method="POST"), "SAMPLE001_fixture_run"))
         self.assertEqual(response.status_code, 303)
 
         conn = connect(config.database.path)

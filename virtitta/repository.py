@@ -282,6 +282,25 @@ def init_db(connection: sqlite3.Connection) -> None:
             PRIMARY KEY (sample_run_id, output_key)
         );
 
+        CREATE TABLE IF NOT EXISTS auth_users (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            display_name TEXT,
+            is_enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_login_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            token_hash TEXT PRIMARY KEY,
+            username TEXT NOT NULL REFERENCES auth_users(username) ON DELETE CASCADE,
+            csrf_token TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_samples_run_name ON samples(run_name);
         CREATE INDEX IF NOT EXISTS idx_samples_sample_id ON samples(sample_id);
         CREATE INDEX IF NOT EXISTS idx_samples_lid ON samples(lid);
@@ -289,6 +308,7 @@ def init_db(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_group_memberships_group_name ON sample_group_memberships(group_name);
         CREATE INDEX IF NOT EXISTS idx_comments_sample_run_id ON sample_comments(sample_run_id);
         CREATE INDEX IF NOT EXISTS idx_output_cache_output_key ON output_cache(output_key);
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_username ON auth_sessions(username);
         """
     )
     _ensure_column(connection, "samples", "sequencing_date", "TEXT")
@@ -788,6 +808,145 @@ def update_output_cache_verified_at(
         """,
         (verified_at, sample_run_id, output_key),
     )
+
+
+def create_auth_user(
+    connection: sqlite3.Connection,
+    username: str,
+    password_hash: str,
+    role: str,
+    display_name: str | None = None,
+) -> None:
+    now = utc_now()
+    connection.execute(
+        """
+        INSERT INTO auth_users (username, password_hash, role, display_name, is_enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?)
+        """,
+        (username, password_hash, role, display_name or None, now, now),
+    )
+    connection.commit()
+
+
+def get_auth_user(connection: sqlite3.Connection, username: str) -> dict | None:
+    row = connection.execute(
+        """
+        SELECT username, password_hash, role, display_name, is_enabled, created_at, updated_at, last_login_at
+        FROM auth_users
+        WHERE username = ?
+        """,
+        (username,),
+    ).fetchone()
+    return _row_to_dict(row)
+
+
+def list_auth_users(connection: sqlite3.Connection) -> list[dict]:
+    return [
+        _row_to_dict(row)
+        for row in connection.execute(
+            """
+            SELECT username, role, display_name, is_enabled, created_at, updated_at, last_login_at
+            FROM auth_users
+            ORDER BY username ASC
+            """
+        ).fetchall()
+    ]
+
+
+def set_auth_user_password(connection: sqlite3.Connection, username: str, password_hash: str) -> bool:
+    result = connection.execute(
+        """
+        UPDATE auth_users
+        SET password_hash = ?, updated_at = ?
+        WHERE username = ?
+        """,
+        (password_hash, utc_now(), username),
+    )
+    if result.rowcount:
+        connection.execute("DELETE FROM auth_sessions WHERE username = ?", (username,))
+    connection.commit()
+    return result.rowcount > 0
+
+
+def set_auth_user_role(connection: sqlite3.Connection, username: str, role: str) -> bool:
+    result = connection.execute(
+        """
+        UPDATE auth_users
+        SET role = ?, updated_at = ?
+        WHERE username = ?
+        """,
+        (role, utc_now(), username),
+    )
+    connection.commit()
+    return result.rowcount > 0
+
+
+def set_auth_user_enabled(connection: sqlite3.Connection, username: str, enabled: bool) -> bool:
+    result = connection.execute(
+        """
+        UPDATE auth_users
+        SET is_enabled = ?, updated_at = ?
+        WHERE username = ?
+        """,
+        (1 if enabled else 0, utc_now(), username),
+    )
+    if not enabled:
+        connection.execute("DELETE FROM auth_sessions WHERE username = ?", (username,))
+    connection.commit()
+    return result.rowcount > 0
+
+
+def create_auth_session(
+    connection: sqlite3.Connection,
+    token_hash: str,
+    username: str,
+    csrf_token: str,
+    expires_at: str,
+) -> None:
+    now = utc_now()
+    connection.execute(
+        """
+        INSERT INTO auth_sessions (token_hash, username, csrf_token, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (token_hash, username, csrf_token, now, expires_at),
+    )
+    connection.execute(
+        "UPDATE auth_users SET last_login_at = ?, updated_at = ? WHERE username = ?",
+        (now, now, username),
+    )
+    connection.commit()
+
+
+def get_auth_session(connection: sqlite3.Connection, token_hash: str, now: str) -> dict | None:
+    row = connection.execute(
+        """
+        SELECT
+            s.token_hash,
+            s.csrf_token,
+            s.expires_at,
+            u.username,
+            u.role,
+            u.display_name,
+            u.is_enabled
+        FROM auth_sessions s
+        JOIN auth_users u ON u.username = s.username
+        WHERE s.token_hash = ? AND s.expires_at > ?
+        """,
+        (token_hash, now),
+    ).fetchone()
+    return _row_to_dict(row)
+
+
+def delete_auth_session(connection: sqlite3.Connection, token_hash: str) -> None:
+    connection.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (token_hash,))
+    connection.commit()
+
+
+def delete_expired_auth_sessions(connection: sqlite3.Connection, now: str) -> int:
+    result = connection.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (now,))
+    connection.commit()
+    return result.rowcount
 
 
 def get_run(connection: sqlite3.Connection, run_name: str) -> dict | None:

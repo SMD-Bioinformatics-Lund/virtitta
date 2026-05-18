@@ -132,6 +132,16 @@ class CacheSettings:
 
 
 @dataclass(frozen=True)
+class AuthSettings:
+    enabled: bool = False
+    provider: str = "local"
+    session_days: int = 7
+    cookie_name: str = "virtitta_session"
+    cookie_secure: bool = False
+    pbkdf2_iterations: int = 600_000
+
+
+@dataclass(frozen=True)
 class UiSettings:
     table_columns: list[str] = field(default_factory=lambda: list(DEFAULT_TABLE_COLUMNS))
     visible_columns: list[str] = field(default_factory=lambda: list(DEFAULT_VISIBLE_COLUMNS))
@@ -159,6 +169,7 @@ class Config:
     annotations: AnnotationSettings
     exports: ExportSettings
     cache: CacheSettings
+    auth: AuthSettings
     ui: UiSettings
     results_roots: list[ResultsRoot]
 
@@ -239,6 +250,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
     annotations_raw = raw.get("annotations", {})
     exports_raw = raw.get("exports", {})
     cache_raw = raw.get("cache", {})
+    auth_raw = raw.get("auth", {})
     ui_raw = raw.get("ui", {})
     root_entries = raw.get("results_roots", [])
 
@@ -292,6 +304,14 @@ def load_config(config_path: str | Path | None = None) -> Config:
             if not Path(cache_raw.get("outputs_root", "data/output_cache")).is_absolute()
             else Path(cache_raw.get("outputs_root", "data/output_cache")),
             output_keys=_normalize_string_list(cache_raw.get("output_keys", DEFAULT_CACHE_OUTPUT_KEYS)),
+        ),
+        auth=AuthSettings(
+            enabled=bool(auth_raw.get("enabled", False)),
+            provider=str(auth_raw.get("provider", "local")),
+            session_days=int(auth_raw.get("session_days", 7)),
+            cookie_name=str(auth_raw.get("cookie_name", "virtitta_session")),
+            cookie_secure=bool(auth_raw.get("cookie_secure", False)),
+            pbkdf2_iterations=int(auth_raw.get("pbkdf2_iterations", 600_000)),
         ),
         ui=UiSettings(
             table_columns=table_columns,

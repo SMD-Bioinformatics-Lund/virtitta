@@ -37,6 +37,8 @@ Important settings:
   - optional server-side export root for LIMS files
 - `cache.outputs_root` and `cache.output_keys`
   - local cache for small post-import artifacts such as clipboard FASTA files and the rug/KDE image
+- `auth.enabled`
+  - optional local login system with role-based permissions; disabled by default
 - `results_roots`
   - one or more result roots that contain imported `virpipa` runs
 - `igv.base_url`
@@ -60,6 +62,11 @@ path = "data/virtitta.sqlite3"
 
 [exports]
 lims_root = "data/lims_exports"
+
+[auth]
+enabled = false
+provider = "local"
+cookie_secure = false
 
 [igv]
 enabled = true
@@ -190,6 +197,34 @@ failed samples:
 ```bash
 PYTHONPATH=$PWD python -m virtitta.cli verify-cache --config virtitta.toml --all-runs
 ```
+
+## Authentication
+
+Authentication is optional and disabled by default. To enable the self-contained local login system, set:
+
+```toml
+[auth]
+enabled = true
+provider = "local"
+cookie_secure = true  # use true behind HTTPS
+```
+
+Create local users from the CLI:
+
+```bash
+PYTHONPATH=$PWD python -m virtitta.cli create-user --config virtitta.toml --username alice --role admin
+PYTHONPATH=$PWD python -m virtitta.cli create-user --config virtitta.toml --username bob --role reviewer
+PYTHONPATH=$PWD python -m virtitta.cli list-users --config virtitta.toml
+```
+
+Roles:
+
+- `admin`: all actions, including deletes, metadata overrides, run refresh, and user management through the CLI
+- `reviewer`: QC, categories, groups, comments, read exports, and server-side LIMS export
+- `commenter`: view, read exports, and add comments
+- `viewer`: view and read exports only
+
+When authentication is enabled, all write forms use CSRF tokens and comments/QC updates use the logged-in user name.
 
 ## Basic Workflow
 

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel login-panel">
+  <h2>Login</h2>
+  <form method="post" action="{{ request.url_for('login') }}" class="stack">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <label>
+      Username
+      <input type="text" name="username" autocomplete="username" autofocus required>
+    </label>
+    <label>
+      Password
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Login</button>
+  </form>
+</section>
+{% endblock %}

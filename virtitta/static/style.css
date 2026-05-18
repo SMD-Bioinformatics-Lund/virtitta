@@ -39,6 +39,30 @@ a:hover {
   background: #efe7d7;
 }
 
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topnav-user {
+  color: #645b4e;
+  font-size: 0.86rem;
+}
+
+.link-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
 .brand {
   display: inline-flex;
   align-items: center;
@@ -78,6 +102,10 @@ a:hover {
   border: 1px solid var(--line);
   padding: 10px;
   min-width: 0;
+}
+
+.login-panel {
+  width: min(360px, 100%);
 }
 
 .warning-banner {

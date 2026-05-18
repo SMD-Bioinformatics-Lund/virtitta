@@ -77,10 +77,13 @@
       <span class="summary-pill summary-fail">Fail {{ summary.fail }}</span>
       <span class="summary-pill summary-selected" data-selected-count>Selected 0</span>
       {% if selected_run_name %}
+      {% if permissions.run_refresh %}
       <form method="post" action="{{ request.url_for('refresh_run_metadata', run_name=selected_run_name) }}" class="inline-form">
         <input type="hidden" name="redirect_to" value="{{ request.url }}">
+        {% if config.auth.enabled %}<input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">{% endif %}
         <button type="submit" class="compact-button">Refresh run</button>
       </form>
+      {% endif %}
       {% endif %}
     </div>
     <details class="column-toggle-panel">
@@ -105,6 +108,7 @@
   </div>
   <form method="post" action="{{ request.url_for('bulk_qc_update') }}">
     <input type="hidden" name="redirect_to" value="{{ request.url }}">
+    {% if config.auth.enabled %}<input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">{% endif %}
     <div class="bulkbar">
       <button type="button" class="secondary" data-select-all>Select all</button>
       <button type="button" class="secondary" data-select-none>Clear</button>
@@ -112,10 +116,15 @@
         <input type="checkbox" data-selected-only>
         Selected only
       </label>
+      {% if permissions.qc_update %}
       <button type="submit" name="qc_status" value="pass">Mark pass</button>
       <button type="submit" name="qc_status" value="fail">Mark fail</button>
       <button type="submit" name="qc_status" value="unreviewed" class="secondary">Reset QC</button>
+      {% endif %}
+      {% if permissions.export_lims %}
       <button type="submit" formaction="{{ request.url_for('bulk_lims_export') }}" formmethod="post" class="secondary">Export LIMS</button>
+      {% endif %}
+      {% if permissions.category_update %}
       <select name="sample_category">
         <option value="">Clear category</option>
         {% for category in available_sample_categories %}
@@ -123,9 +132,13 @@
         {% endfor %}
       </select>
       <button type="submit" formaction="{{ request.url_for('bulk_category_update') }}" formmethod="post" class="secondary">Apply category</button>
+      {% endif %}
+      {% if permissions.group_update %}
       <input type="text" name="group_name" placeholder="Manual group">
       <button type="submit" formaction="{{ request.url_for('bulk_add_group') }}" formmethod="post" class="secondary">Add group</button>
       <button type="submit" formaction="{{ request.url_for('bulk_remove_group') }}" formmethod="post" class="secondary">Remove group</button>
+      {% endif %}
+      {% if permissions.export_read %}
       <details class="action-menu">
         <summary>Export...</summary>
         <div class="action-menu-list">
@@ -135,6 +148,8 @@
           <button type="button" class="secondary" data-export-clipboard="{{ request.url_for('bulk_iupac_fasta_clipboard_export') }}">15% IUPAC FASTA to clipboard</button>
         </div>
       </details>
+      {% endif %}
+      {% if permissions.sample_delete %}
       <button
         type="submit"
         formaction="{{ request.url_for('bulk_delete_samples') }}"
@@ -142,8 +157,13 @@
         class="secondary"
         onclick="return confirm('Delete the selected samples from the Virtitta database? This does not delete result files on disk.')"
       >Delete samples</button>
+      {% endif %}
+      {% if permissions.qc_update %}
+      {% if not config.auth.enabled %}
       <input type="text" name="comment_author" placeholder="Comment author">
+      {% endif %}
       <input type="text" name="comment_body" placeholder="Comment for fail or note on selected samples" class="bulk-comment">
+      {% endif %}
       <span class="count" data-sample-count data-total-count="{{ rows|length }}">{{ rows|length }} samples</span>
     </div>
 
@@ -245,8 +265,12 @@
             </td>
             <td class="col-actions">
               <div class="action-links">
+                {% if permissions.export_read %}
                 <a class="mini-action" href="{{ request.url_for('sample_igv', sample_run_id=row['sample_run_id']) }}">IGV</a>
+                {% endif %}
+                {% if permissions.export_lims %}
                 <a class="mini-action secondary" href="{{ request.url_for('sample_lims_export', sample_run_id=row['sample_run_id']) }}">LIMS</a>
+                {% endif %}
                 <a class="mini-action secondary" href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}">Open</a>
               </div>
             </td>
@@ -296,6 +320,7 @@ const clientEmptyState = document.getElementById('client-empty-state');
 const filterForm = document.querySelector('[data-filter-form]');
 const columnVisibilityStorageKey = {{ column_visibility_storage_key|tojson }};
 const selectionStorageKey = 'virtitta.selectedSampleIds.v1';
+const csrfToken = {% if config.auth.enabled %}{{ request.state.current_user.csrf_token|tojson }}{% else %}''{% endif %};
 let suppressSelectionSave = false;
 
 function showClientNotice(message, isError = false) {
@@ -580,6 +605,9 @@ async function fetchClipboardExport(url, title) {
     return;
   }
   const formData = new FormData();
+  if (csrfToken) {
+    formData.append('csrf_token', csrfToken);
+  }
   for (const id of ids) {
     formData.append('sample_run_id', id);
   }

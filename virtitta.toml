@@ -25,6 +25,14 @@ lims_root = "data/lims_exports"
 outputs_root = "data/output_cache"
 output_keys = ["export_fasta", "export_iupac_fasta", "display_rug_kde_plot"]
 
+[auth]
+enabled = false
+provider = "local"
+session_days = 7
+cookie_name = "virtitta_session"
+cookie_secure = false
+pbkdf2_iterations = 600000
+
 [ui]
 table_columns = [
   "lid",
