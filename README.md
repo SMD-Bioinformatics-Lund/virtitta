@@ -17,6 +17,12 @@ It imports per-sample QC summaries from completed `virpipa` runs into a local SQ
 
 The interface is designed for efficient day-to-day review rather than presentation-heavy dashboards.
 
+## Documentation
+
+- [Interface guide](docs/INTERFACE.md): table behavior, sample detail pages, exports, roles, and common workflows
+- [Admin guide](docs/ADMIN.md): setup, CLI commands, authentication, maintenance, and deployment notes
+- [Plans and TODO](docs/PLANS.md): future work and deferred cleanup items
+
 ## Data Source
 
 Virtitta does not scrape raw pipeline outputs directly. It imports the structured run summaries produced by `virpipa`:
@@ -314,18 +320,11 @@ Save location behavior:
 
 ## Next Work
 
-Planned next larger feature:
-
-- clustering of selected isolates from within Virtitta
-  - run trimming
-  - align with MAFFT
-  - infer a tree with IQ-TREE 2
-  - render or serve the resulting tree in the interface
-  - keep this config-driven so tool paths, output locations, and enabled clustering behavior can be adjusted without code changes
+Future work is tracked in [Plans and TODO](docs/PLANS.md).
 
 ## Notes
 
 - sample deletion removes the sample from the Virtitta database only
 - deleting a sample does not remove any result files from disk
 - IGV launch assumes local desktop IGV is already running and listening on the configured port
-- Virtitta currently targets single-user internal use
+- authentication is optional, but should be enabled before exposing Virtitta beyond a trusted local workstation

@@ -56,6 +56,17 @@ For multi-step tasks, state a brief plan:
 3. [Step] → verify: [check]
 ```
 
+### 5. Documentation And Planning
+
+**Record future plans when they are discussed.**
+
+- Use `docs/PLANS.md` for TODOs, deferred decisions, deployment plans, and future feature plans that are not implemented immediately.
+- Use `docs/INTERFACE.md` for browser-facing workflows and UI behavior.
+- Use `docs/ADMIN.md` for setup, CLI commands, authentication, maintenance, and deployment notes.
+- When adding or changing a CLI command, update `docs/ADMIN.md`.
+- When adding or changing user-visible UI behavior, update `docs/INTERFACE.md`.
+- Keep `README.md` as the compact entry point and link to detailed docs instead of growing it indefinitely.
+
 ## Overview
 
 Virtitta is an internal analysis and review interface for VirPipa results. It ingests the machine-readable
@@ -168,22 +179,10 @@ python -m compileall virtitta
   - selected 15% IUPAC FASTA records
   - prefer using the configured `export_*` output paths from imported QC JSON rather than rebuilding FASTA content in the app
 
-## Planned next larger feature
+## Planned work
 
-- Add isolate clustering from selected samples.
-- Expected first implementation:
-  - select samples in the main table
-  - derive/export the appropriate FASTA inputs
-  - run trimming if needed
-  - align with MAFFT
-  - infer phylogeny with IQ-TREE 2
-  - store outputs in a predictable configured location
-  - expose tree viewing/downloading in the UI
-- Keep clustering configuration-driven:
-  - tool paths or container commands
-  - working/output directories
-  - enabled/disabled feature flags
-  - virus-specific defaults if HCV-specific assumptions are introduced
+- Keep future plans and TODOs in `docs/PLANS.md`.
+- When a plan is implemented, update or remove the corresponding entry in `docs/PLANS.md`.
 
 ## Future-proofing
 
