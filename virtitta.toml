@@ -10,6 +10,10 @@ path = "data/virtitta.sqlite3"
 enabled = true
 base_url = "http://localhost:60151/load"
 
+[webigv]
+enabled = true
+igv_js_url = "/static/igv.min.js"
+
 [features]
 comments = true
 bulk_qc = true

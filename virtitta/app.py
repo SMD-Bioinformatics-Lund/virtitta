@@ -89,6 +89,32 @@ IGV_TRACK_LINKS = [
     ("Selected VADR GFF", "selected_vadr_gff"),
 ]
 
+WEBIGV_ANNOTATION_TRACKS = [
+    ("VADR BED", "vadr_bed", "bed"),
+    ("Resistance GFF", "resistance_gff", "gff3"),
+    ("Selected VADR GFF", "selected_vadr_gff", "gff3"),
+]
+WEBIGV_VCF_TRACKS = [
+    ("VCF m0.05", "filtered_vcf_m005"),
+    ("VCF m0.1", "filtered_vcf_m01"),
+    ("VCF m0.15", "filtered_vcf_m015"),
+    ("VCF m0.2", "filtered_vcf_m02"),
+    ("VCF m0.3", "filtered_vcf_m03"),
+    ("VCF m0.4", "filtered_vcf_m04"),
+]
+WEBIGV_ALLOWED_OUTPUT_KEYS = {
+    "main_fasta",
+    "main_fasta_index",
+    "main_cram",
+    "main_cram_index",
+    "vadr_bed",
+    "resistance_gff",
+    "selected_vadr_gff",
+}
+for _label, _key in WEBIGV_VCF_TRACKS:
+    WEBIGV_ALLOWED_OUTPUT_KEYS.add(_key)
+    WEBIGV_ALLOWED_OUTPUT_KEYS.add(f"{_key}_index")
+
 LIMS_EXPORT_HEADER = "sample_id\tparameter_name\tparameter_value\tcomment"
 HCV_RESISTANCE_DRUGS = [
     ("Asunaprevir", "ASV"),
@@ -695,6 +721,97 @@ def build_igv_goto_url(config: Config, locus: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, goto_path, urlencode({"locus": locus}), ""))
 
 
+def webigv_enabled(config: Config) -> bool:
+    return config.features.igv and config.webigv.enabled
+
+
+def webigv_available(outputs: dict) -> bool:
+    return bool(outputs.get("main_fasta") and outputs.get("main_fasta_index"))
+
+
+def webigv_track_url(request: Request, sample_run_id: str, output_key: str) -> str:
+    return str(request.url_for("sample_webigv_file", sample_run_id=sample_run_id, output_key=output_key))
+
+
+def webigv_named_track_url(request: Request, sample_run_id: str, output_key: str, outputs: dict) -> str:
+    relname = outputs.get(output_key) or output_key
+    filename = Path(relname).name
+    return str(
+        request.url_for(
+            "sample_webigv_named_file",
+            sample_run_id=sample_run_id,
+            output_key=output_key,
+            filename=filename,
+        )
+    )
+
+
+def build_webigv_browser_config(
+    config: Config,
+    request: Request,
+    sample_row,
+    outputs: dict | None = None,
+    locus: str | None = None,
+) -> dict:
+    if not webigv_enabled(config):
+        raise HTTPException(status_code=404, detail="webIGV integration is disabled")
+
+    resolved_outputs = outputs if outputs is not None else effective_outputs(config, sample_row)
+    if not webigv_available(resolved_outputs):
+        raise HTTPException(status_code=404, detail="No indexed genome FASTA available for webIGV")
+
+    sample_run_id = sample_row["sample_run_id"]
+    browser_config = {
+        "reference": {
+            "id": sample_run_id,
+            "name": display_identifier(sample_row) or sample_row["sample_id"],
+            "fastaURL": webigv_named_track_url(request, sample_run_id, "main_fasta", resolved_outputs),
+            "indexURL": webigv_named_track_url(request, sample_run_id, "main_fasta_index", resolved_outputs),
+        },
+        "tracks": [],
+    }
+    if locus:
+        browser_config["locus"] = locus
+
+    if resolved_outputs.get("main_cram") and resolved_outputs.get("main_cram_index"):
+        browser_config["tracks"].append(
+            {
+                "name": "Main CRAM",
+                "type": "alignment",
+                "format": "cram",
+                "url": webigv_named_track_url(request, sample_run_id, "main_cram", resolved_outputs),
+                "indexURL": webigv_named_track_url(request, sample_run_id, "main_cram_index", resolved_outputs),
+                "checkSequenceMD5": False,
+            }
+        )
+
+    for label, output_key in WEBIGV_VCF_TRACKS:
+        index_key = f"{output_key}_index"
+        if resolved_outputs.get(output_key) and resolved_outputs.get(index_key):
+            browser_config["tracks"].append(
+                {
+                    "name": label,
+                    "type": "variant",
+                    "format": "vcf",
+                    "url": webigv_named_track_url(request, sample_run_id, output_key, resolved_outputs),
+                    "indexURL": webigv_named_track_url(request, sample_run_id, index_key, resolved_outputs),
+                }
+            )
+
+    for label, output_key, file_format in WEBIGV_ANNOTATION_TRACKS:
+        if resolved_outputs.get(output_key):
+            browser_config["tracks"].append(
+                {
+                    "name": label,
+                    "type": "annotation",
+                    "format": file_format,
+                    "url": webigv_named_track_url(request, sample_run_id, output_key, resolved_outputs),
+                }
+            )
+
+    return browser_config
+
+
 def create_app(config_path: str | Path | None = None) -> FastAPI:
     config = load_config(config_path)
     from virtitta.importer import import_run as import_run_dir
@@ -925,6 +1042,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                     "run_refresh": permission_allowed(request, PERMISSION_RUN_REFRESH),
                     "sample_delete": permission_allowed(request, PERMISSION_SAMPLE_DELETE),
                 },
+                "webigv_enabled": webigv_enabled(config),
                 "qc_status_options": QC_STATUS_OPTIONS,
                 "summary": {
                     "total": len(rows),
@@ -1208,6 +1326,9 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 igv_url = build_igv_url(config, sample_row, outputs)
             except HTTPException:
                 igv_url = None
+        webigv_url = None
+        if webigv_enabled(config) and webigv_available(outputs):
+            webigv_url = str(request.url_for("sample_webigv", sample_run_id=sample_run_id))
 
         resistance_cells = build_resistance_cells(raw)
         resistance_mutations = build_resistance_mutations(raw, sample_row["sample_id"])
@@ -1226,6 +1347,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "format_value": format_value,
                 "display_identifier": display_identifier,
                 "igv_url": igv_url,
+                "webigv_url": webigv_url,
                 "resistance_cells": resistance_cells,
                 "resistance_mutations": resistance_mutations,
                 "resistance_analysis_present": bool(resistance_summary.get("analysis_present")),
@@ -1377,6 +1499,66 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             return FileResponse(cached_path, filename=outputs.get(output_key) or cached_path.name)
         file_path, relname = resolve_output_file(config, sample_row, output_key)
         return FileResponse(file_path, filename=relname)
+
+    @app.get("/samples/{sample_run_id}/webigv", response_class=HTMLResponse)
+    def sample_webigv(request: Request, sample_run_id: str, locus: str = Query(default="")):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        connection = connect(config.database.path)
+        try:
+            sample_row = get_sample(connection, sample_run_id)
+            if sample_row is None:
+                raise HTTPException(status_code=404, detail="Sample not found")
+            raw = raw_json_for_sample(sample_row)
+        finally:
+            connection.close()
+
+        outputs = effective_outputs(config, sample_row, raw)
+        browser_config = build_webigv_browser_config(
+            config,
+            request,
+            sample_row,
+            outputs,
+            locus.strip() or None,
+        )
+        return templates.TemplateResponse(
+            request,
+            "webigv.html",
+            {
+                "request": request,
+                "config": config,
+                "sample": sample_row,
+                "display_identifier": display_identifier,
+                "webigv_config_json": json.dumps(browser_config),
+                "warning_message": "",
+                "notice_message": "",
+            },
+        )
+
+    @app.get("/samples/{sample_run_id}/webigv/files/{output_key}")
+    def sample_webigv_file(request: Request, sample_run_id: str, output_key: str):
+        return serve_webigv_file(request, sample_run_id, output_key)
+
+    @app.get("/samples/{sample_run_id}/webigv/files/{output_key}/{filename}")
+    def sample_webigv_named_file(request: Request, sample_run_id: str, output_key: str, filename: str):
+        return serve_webigv_file(request, sample_run_id, output_key)
+
+    def serve_webigv_file(request: Request, sample_run_id: str, output_key: str):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        if not webigv_enabled(config):
+            raise HTTPException(status_code=404, detail="webIGV integration is disabled")
+        if output_key not in WEBIGV_ALLOWED_OUTPUT_KEYS:
+            raise HTTPException(status_code=404, detail="Output is not available for webIGV")
+
+        connection = connect(config.database.path)
+        try:
+            sample_row = get_sample(connection, sample_run_id)
+            if sample_row is None:
+                raise HTTPException(status_code=404, detail="Sample not found")
+        finally:
+            connection.close()
+
+        file_path, relname = resolve_output_file(config, sample_row, output_key)
+        return FileResponse(file_path, filename=relname, content_disposition_type="inline")
 
     @app.post("/runs/{run_name}/refresh")
     async def refresh_run_metadata(

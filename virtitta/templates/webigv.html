@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel split-header">
+  <div>
+    <h2>webIGV · {{ display_identifier(sample) }}</h2>
+    <div class="meta-line">{{ sample["sample_id"] }} · {{ sample["run_name"] }}</div>
+  </div>
+  <div class="button-row">
+    <a class="button-link secondary" href="{{ request.url_for('sample_detail', sample_run_id=sample['sample_run_id']) }}">Details</a>
+    <a class="button-link secondary" href="{{ request.url_for('index') }}">Samples</a>
+  </div>
+</section>
+
+<section class="panel webigv-panel">
+  <div id="webigv-browser" class="webigv-browser"></div>
+</section>
+
+<script src="{{ config.webigv.igv_js_url }}"></script>
+<script>
+const webIgvConfig = {{ webigv_config_json|safe }};
+const webIgvContainer = document.getElementById('webigv-browser');
+
+if (!window.igv || !window.igv.createBrowser) {
+  window.showAppToast('webIGV could not load the local IGV.js asset.', true);
+} else {
+  window.igv.createBrowser(webIgvContainer, webIgvConfig).catch((error) => {
+    window.showAppToast(error.message || 'webIGV failed to load this sample.', true);
+  });
+}
+</script>
+{% endblock %}

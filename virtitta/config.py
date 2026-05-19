@@ -109,6 +109,12 @@ class IgvSettings:
 
 
 @dataclass(frozen=True)
+class WebIgvSettings:
+    enabled: bool = False
+    igv_js_url: str = "/static/igv.min.js"
+
+
+@dataclass(frozen=True)
 class FeatureSettings:
     comments: bool = True
     bulk_qc: bool = True
@@ -165,6 +171,7 @@ class Config:
     app: AppSettings
     database: DatabaseSettings
     igv: IgvSettings
+    webigv: WebIgvSettings
     features: FeatureSettings
     annotations: AnnotationSettings
     exports: ExportSettings
@@ -246,6 +253,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
     app_raw = raw.get("app", {})
     db_raw = raw.get("database", {})
     igv_raw = raw.get("igv", {})
+    webigv_raw = raw.get("webigv", {})
     features_raw = raw.get("features", {})
     annotations_raw = raw.get("annotations", {})
     exports_raw = raw.get("exports", {})
@@ -281,6 +289,10 @@ def load_config(config_path: str | Path | None = None) -> Config:
         igv=IgvSettings(
             enabled=bool(igv_raw.get("enabled", True)),
             base_url=str(igv_raw.get("base_url", "http://localhost:60151/load")),
+        ),
+        webigv=WebIgvSettings(
+            enabled=bool(webigv_raw.get("enabled", False)),
+            igv_js_url=str(webigv_raw.get("igv_js_url", "/static/igv.min.js")),
         ),
         features=FeatureSettings(
             comments=bool(features_raw.get("comments", True)),

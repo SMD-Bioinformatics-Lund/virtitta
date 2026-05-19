@@ -267,6 +267,9 @@
               <div class="action-links">
                 {% if permissions.export_read %}
                 <a class="mini-action" href="{{ request.url_for('sample_igv', sample_run_id=row['sample_run_id']) }}">IGV</a>
+                {% if webigv_enabled %}
+                <a class="mini-action" href="{{ request.url_for('sample_webigv', sample_run_id=row['sample_run_id']) }}">webIGV</a>
+                {% endif %}
                 {% endif %}
                 {% if permissions.export_lims %}
                 <a class="mini-action secondary" href="{{ request.url_for('sample_lims_export', sample_run_id=row['sample_run_id']) }}">LIMS</a>

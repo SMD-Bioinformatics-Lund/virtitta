@@ -56,10 +56,6 @@ table_columns = [
   "qc_coverage_1x_pct",
   "qc_coverage_10x_pct",
   "qc_coverage_100x_pct",
-  "sample_metadata_ct",
-  "sample_metadata_library_concentration_ng_ul",
-  "sample_metadata_library_fragment_length_bp",
-  "run_name",
   "qc_coverage_1000x_pct",
   "variant_af_count_005",
   "variant_af_count_01",
@@ -67,6 +63,10 @@ table_columns = [
   "variant_af_count_02",
   "variant_af_count_03",
   "variant_af_count_04",
+  "sample_metadata_ct",
+  "sample_metadata_library_concentration_ng_ul",
+  "sample_metadata_library_fragment_length_bp",
+  "run_name",
 ]
 visible_columns = [
   "lid",
@@ -86,28 +86,37 @@ visible_columns = [
   "qc_coverage_1x_pct",
   "qc_coverage_10x_pct",
   "qc_coverage_100x_pct",
+  "variant_af_count_015",
   "sample_metadata_ct",
   "sample_metadata_library_concentration_ng_ul",
   "sample_metadata_library_fragment_length_bp",
   "run_name",
 ]
-default_sort = "run_name"
+default_sort = "sequencing_date"
 default_sort_desc = true
 
 [ui.column_max_widths]
-run_name = "180px"
+run_name = "36ch"
 comment_count = "120px"
 
 [ui.highlight_rules.host_filter_reads_removed_proportion]
-warn_over = 0.01
-danger_over = 0.05
+warn_over = 0.1
+danger_over = 0.5
+
+[ui.highlight_rules.qc_coverage_1x_pct]
+warn_under = 99
+danger_under = 97
+
+[ui.highlight_rules.qc_coverage_10x_pct]
+warn_under = 97
+danger_under = 95
 
 [ui.highlight_rules.qc_coverage_pct]
 warn_under = 95
 danger_under = 90
 
 [ui.highlight_rules.qc_mean_depth]
-warn_under = 100
+warn_under = 70
 danger_under = 30
 
 [ui.highlight_rules.typing_main_blast_identity]
@@ -119,6 +128,6 @@ warn_over = 32
 danger_over = 36
 
 [[results_roots]]
-name = "default"
-linux_path = "/fs1/jonas/hcv/test_results"
+name = "hcv_test_results"
+linux_path = "/mnt/fs1/jonas/hcv/test_results"
 windows_path = "Q:/jonas/hcv/test_results"

@@ -10,6 +10,9 @@
     {% if igv_url %}
     <a class="button-link" href="{{ igv_url }}">Launch IGV</a>
     {% endif %}
+    {% if webigv_url %}
+    <a class="button-link secondary" href="{{ webigv_url }}">Open webIGV</a>
+    {% endif %}
     {% endif %}
     {% if permissions.run_refresh %}
     <form method="post" action="{{ request.url_for('refresh_run_metadata', run_name=refresh_run_name) }}" class="inline-form">
@@ -220,6 +223,9 @@
           <td>
             {% if mutation["locus"] and permissions.export_read %}
             <a class="mini-action" href="{{ request.url_for('sample_igv_mutation', sample_run_id=sample['sample_run_id'], mutation_index=mutation['index']) }}">Goto</a>
+            {% if webigv_url %}
+            <a class="mini-action secondary" href="{{ webigv_url }}?locus={{ mutation['locus']|urlencode }}">webIGV</a>
+            {% endif %}
             {% endif %}
           </td>
         </tr>

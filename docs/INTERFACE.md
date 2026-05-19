@@ -82,6 +82,19 @@ The detail page shows:
 - IGV track file links
 - raw imported QC JSON
 
+## IGV Viewing
+
+Virtitta can expose two IGV workflows when configured:
+
+- `IGV` launches a standalone desktop IGV instance through its local HTTP endpoint and uses configured Windows drive
+  mappings.
+- `webIGV` opens an embedded browser viewer served by Virtitta. This is a fallback for users who cannot access the
+  same drive mappings as the desktop IGV setup.
+
+webIGV loads only files listed in the imported VirPipa `outputs` JSON. It uses the indexed sample FASTA as the
+reference, the main CRAM when its index is available, BED/GFF annotation tracks, and VCF tracks only when explicit
+VCF index output keys were imported.
+
 ## Manual Metadata Overrides
 
 Admins can use `Edit metadata` on the sample detail page to override narrow display/review fields:

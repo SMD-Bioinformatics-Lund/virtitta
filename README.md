@@ -12,7 +12,7 @@ It imports per-sample QC summaries from completed `virpipa` runs into a local SQ
 - manual QC assignment (`pass`, `fail`, `unreviewed`)
 - comments on individual samples
 - bulk QC actions across selected samples
-- IGV launch links for local desktop IGV
+- IGV launch links for local desktop IGV, with optional webIGV fallback
 - LIMS export based on the imported `2limsrs` files plus Virtitta QC state
 
 The interface is designed for efficient day-to-day review rather than presentation-heavy dashboards.
@@ -49,6 +49,8 @@ Important settings:
   - one or more result roots that contain imported `virpipa` runs
 - `igv.base_url`
   - usually `http://localhost:60151/load`
+- `webigv.enabled`
+  - optional browser-based IGV fallback for users without local drive mappings
 - `results_roots[].windows_path`
   - Windows-visible root path used when constructing IGV URLs
 - `ui.table_columns`
@@ -77,6 +79,10 @@ cookie_secure = false
 [igv]
 enabled = true
 base_url = "http://localhost:60151/load"
+
+[webigv]
+enabled = false
+igv_js_url = "/static/igv.min.js"
 
 [[results_roots]]
 name = "default"

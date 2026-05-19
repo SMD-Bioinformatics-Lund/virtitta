@@ -87,3 +87,11 @@ Next steps:
 - re-check `TestClient` behavior in the updated conda environment
 - if stable, convert auth smoke tests to client-style requests for readability
 - keep at least one low-level ASGI test if it catches middleware redirects clearly
+
+## Implemented Plans
+
+### webIGV Fallback
+
+Implemented a browser-based IGV fallback for users without desktop drive mappings. Desktop IGV remains the preferred
+action, while webIGV serves imported, indexed track files through authenticated Virtitta routes using the server's
+read-only Linux result-root mounts.

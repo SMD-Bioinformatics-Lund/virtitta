@@ -193,6 +193,15 @@ a:hover {
   white-space: pre;
 }
 
+.webigv-panel {
+  padding: 6px;
+}
+
+.webigv-browser {
+  min-height: calc(100vh - 132px);
+  background: #fff;
+}
+
 .filters,
 .bulkbar,
 .button-row,

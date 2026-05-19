@@ -71,7 +71,7 @@ For multi-step tasks, state a brief plan:
 
 Virtitta is an internal analysis and review interface for VirPipa results. It ingests the machine-readable
 `*_qc_summary.json` outputs produced by `virpipa`, stores normalized sample records plus app-owned review
-state in a relational database, and exposes a compact web UI for triage, comments, QC decisions, and IGV launch.
+state in a relational database, and exposes a compact web UI for triage, comments, QC decisions, and IGV viewing.
 
 **Language:** Python  
 **Web stack:** FastAPI + Jinja templates  
@@ -158,6 +158,7 @@ python -m compileall virtitta
   - IGV launch
   - LIMS export
   - compact resistance strip
+  - optional webIGV fallback for users without desktop drive mappings
 - The resistance strip is intentionally fixed to the full geno2pheno HCV drug set and should not vary in length between samples.
 - Native browser `title` tooltips are currently used in the main table; if tooltip timing/formatting changes are needed later, switch deliberately to a custom tooltip implementation rather than partially mixing both.
 
