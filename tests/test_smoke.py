@@ -1399,14 +1399,12 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("Main CRAM", track_names)
         cram_track = next(track for track in browser_config["tracks"] if track["name"] == "Main CRAM")
         self.assertIs(cram_track["checkSequenceMD5"], False)
+        self.assertIs(cram_track["showSoftClips"], True)
         self.assertIn("VADR BED", track_names)
         self.assertNotIn("VCF m0.05", track_names)
 
-    def test_webigv_config_loads_vcf_only_with_explicit_index_output(self) -> None:
-        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-        fixture[0]["outputs"]["filtered_vcf_m005_index"] = "SAMPLE001-pilon-m0.05.vcf.gz.tbi"
-        self.write_run_summaries([fixture[0]])
-        (self.sample_dir / "SAMPLE001-pilon-m0.05.vcf.gz.tbi").write_text("placeholder", encoding="utf-8")
+    def test_webigv_config_loads_vcf_with_existing_csi_sidecar(self) -> None:
+        (self.sample_dir / "SAMPLE001-pilon-m0.05.vcf.gz.csi").write_text("placeholder", encoding="utf-8")
 
         self.enable_webigv()
         config = load_config(self.config_path)
@@ -1428,7 +1426,37 @@ class VirtittaSmokeTests(unittest.TestCase):
             vcf_tracks[0]["url"],
         )
         self.assertIn(
-            "/samples/SAMPLE001_fixture_run/webigv/files/filtered_vcf_m005_index/SAMPLE001-pilon-m0.05.vcf.gz.tbi",
+            "/samples/SAMPLE001_fixture_run/webigv/files/filtered_vcf_m005_index/SAMPLE001-pilon-m0.05.vcf.gz.csi",
+            vcf_tracks[0]["indexURL"],
+        )
+
+    def test_webigv_config_loads_vcf_only_with_explicit_index_output(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["outputs"]["filtered_vcf_m005_index"] = "SAMPLE001-pilon-m0.05.vcf.gz.csi"
+        self.write_run_summaries([fixture[0]])
+        (self.sample_dir / "SAMPLE001-pilon-m0.05.vcf.gz.csi").write_text("placeholder", encoding="utf-8")
+
+        self.enable_webigv()
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        request = self.make_request(app)
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        browser_config = build_webigv_browser_config(config, request, sample)
+        vcf_tracks = [track for track in browser_config["tracks"] if track["name"] == "VCF m0.05"]
+        self.assertEqual(len(vcf_tracks), 1)
+        self.assertIn(
+            "/samples/SAMPLE001_fixture_run/webigv/files/filtered_vcf_m005/SAMPLE001-pilon-m0.05.vcf.gz",
+            vcf_tracks[0]["url"],
+        )
+        self.assertIn(
+            "/samples/SAMPLE001_fixture_run/webigv/files/filtered_vcf_m005_index/SAMPLE001-pilon-m0.05.vcf.gz.csi",
             vcf_tracks[0]["indexURL"],
         )
 

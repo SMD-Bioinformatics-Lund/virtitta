@@ -194,11 +194,12 @@ a:hover {
 }
 
 .webigv-panel {
-  padding: 6px;
+  padding: 4px;
 }
 
 .webigv-browser {
-  min-height: calc(100vh - 132px);
+  height: calc(100vh - 106px);
+  min-height: 520px;
   background: #fff;
 }
 

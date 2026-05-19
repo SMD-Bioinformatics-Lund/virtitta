@@ -52,8 +52,8 @@ igv_js_url = "/static/igv.min.js"
 ```
 
 webIGV serves track files through authenticated Virtitta routes using `results_roots[].linux_path`. The mounted result
-root should be read-only for the Virtitta process. VCF tracks are loaded only when the VirPipa QC JSON reports both the
-VCF output and a matching explicit index output such as `filtered_vcf_m005_index`.
+root should be read-only for the Virtitta process. VCF tracks are loaded when the VirPipa QC JSON reports the VCF output
+and either a matching explicit index output such as `filtered_vcf_m005_index` or a `<vcf>.csi` sidecar exists on disk.
 
 webIGV disables IGV.js' browser-side CRAM slice MD5 check. VirPipa writes CRAMs against the sample FASTA, and Virtitta
 serves the matching FASTA, FAI, CRAM, and CRAI files from the imported QC JSON. In practice IGV.js can still ask the

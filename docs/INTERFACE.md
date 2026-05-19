@@ -91,9 +91,9 @@ Virtitta can expose two IGV workflows when configured:
 - `webIGV` opens an embedded browser viewer served by Virtitta. This is a fallback for users who cannot access the
   same drive mappings as the desktop IGV setup.
 
-webIGV loads only files listed in the imported VirPipa `outputs` JSON. It uses the indexed sample FASTA as the
-reference, the main CRAM when its index is available, BED/GFF annotation tracks, and VCF tracks only when explicit
-VCF index output keys were imported.
+webIGV loads files through imported VirPipa `outputs` JSON paths. It uses the indexed sample FASTA as the reference,
+the main CRAM when its index is available, BED/GFF annotation tracks, and VCF tracks when an explicit VCF index output
+key was imported or a matching `.csi` sidecar exists next to the imported VCF.
 
 ## Manual Metadata Overrides
 

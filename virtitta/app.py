@@ -102,6 +102,7 @@ WEBIGV_VCF_TRACKS = [
     ("VCF m0.3", "filtered_vcf_m03"),
     ("VCF m0.4", "filtered_vcf_m04"),
 ]
+WEBIGV_VCF_OUTPUT_KEYS = {key for _label, key in WEBIGV_VCF_TRACKS}
 WEBIGV_ALLOWED_OUTPUT_KEYS = {
     "main_fasta",
     "main_fasta_index",
@@ -506,6 +507,42 @@ def resolve_output_file(config: Config, sample_row, output_key: str) -> tuple[Pa
     return candidate, relname
 
 
+def inferred_webigv_index_relname(outputs: dict, output_key: str) -> str | None:
+    if not output_key.endswith("_index"):
+        return None
+
+    base_output_key = output_key.removesuffix("_index")
+    if base_output_key not in WEBIGV_VCF_OUTPUT_KEYS:
+        return None
+
+    relname = outputs.get(base_output_key)
+    if not relname:
+        return None
+    return f"{relname}.csi"
+
+
+def resolve_webigv_output_file(config: Config, sample_row, output_key: str) -> tuple[Path, str]:
+    outputs = effective_outputs(config, sample_row)
+    relname = outputs.get(output_key) or inferred_webigv_index_relname(outputs, output_key)
+    if not relname:
+        raise HTTPException(status_code=404, detail=f"Output not available: {output_key}")
+
+    sample_dir = resolve_sample_results_dir(config, sample_row)
+    candidate = safe_output_path(sample_dir, relname)
+    if not candidate.exists():
+        raise HTTPException(status_code=404, detail=f"Missing file on disk: {candidate}")
+    return candidate, relname
+
+
+def webigv_output_exists(config: Config, sample_row, outputs: dict, output_key: str) -> bool:
+    relname = outputs.get(output_key) or inferred_webigv_index_relname(outputs, output_key)
+    if not relname:
+        return False
+
+    sample_dir = resolve_sample_results_dir(config, sample_row)
+    return safe_output_path(sample_dir, relname).exists()
+
+
 def windows_path_to_igv_path(path_str: str) -> str:
     path_str = path_str.replace("\\", "/")
     if len(path_str) >= 3 and path_str[1:3] == ":/":
@@ -734,7 +771,7 @@ def webigv_track_url(request: Request, sample_run_id: str, output_key: str) -> s
 
 
 def webigv_named_track_url(request: Request, sample_run_id: str, output_key: str, outputs: dict) -> str:
-    relname = outputs.get(output_key) or output_key
+    relname = outputs.get(output_key) or inferred_webigv_index_relname(outputs, output_key) or output_key
     filename = Path(relname).name
     return str(
         request.url_for(
@@ -782,12 +819,14 @@ def build_webigv_browser_config(
                 "url": webigv_named_track_url(request, sample_run_id, "main_cram", resolved_outputs),
                 "indexURL": webigv_named_track_url(request, sample_run_id, "main_cram_index", resolved_outputs),
                 "checkSequenceMD5": False,
+                "showSoftClips": True,
+                "displayMode": "SQUISHED",
             }
         )
 
     for label, output_key in WEBIGV_VCF_TRACKS:
         index_key = f"{output_key}_index"
-        if resolved_outputs.get(output_key) and resolved_outputs.get(index_key):
+        if resolved_outputs.get(output_key) and webigv_output_exists(config, sample_row, resolved_outputs, index_key):
             browser_config["tracks"].append(
                 {
                     "name": label,
@@ -1557,7 +1596,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         finally:
             connection.close()
 
-        file_path, relname = resolve_output_file(config, sample_row, output_key)
+        file_path, relname = resolve_webigv_output_file(config, sample_row, output_key)
         return FileResponse(file_path, filename=relname, content_disposition_type="inline")
 
     @app.post("/runs/{run_name}/refresh")
