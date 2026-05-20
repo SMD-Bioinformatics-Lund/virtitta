@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -31,13 +33,30 @@ from virtitta.auth import (
     get_user_from_cookie,
     logout_session,
 )
+from virtitta.cluster import (
+    ARTIFACT_GRAPETREE_JSON,
+    CLUSTER_ARTIFACT_ALIASES,
+    PUBLIC_CLUSTER_ARTIFACTS,
+    ClusterError,
+    artifact_path,
+    command_config_snapshot,
+    cluster_artifacts,
+    ensure_grapetree_json,
+    prepare_cluster_files,
+    run_cluster_job,
+    write_command_snapshot,
+)
 from virtitta.config import DEFAULT_COLUMN_LABELS, QC_STATUS_OPTIONS, Config, load_config
 from virtitta.repository import (
     add_comment,
     add_samples_to_group,
     connect,
+    create_cluster_job,
     delete_comment,
     delete_samples,
+    get_cluster_job,
+    get_cluster_job_by_public_token,
+    get_cluster_job_samples,
     get_comments,
     get_run,
     get_sample,
@@ -49,9 +68,11 @@ from virtitta.repository import (
     list_samples,
     raw_json_for_sample,
     remove_samples_from_group,
+    mark_stale_cluster_jobs_failed,
     set_sample_category,
     set_sample_field_overrides,
     update_qc_status,
+    utc_now,
 )
 
 
@@ -609,6 +630,27 @@ def load_sample_rows(config: Config, sample_run_ids: list[str]) -> list[dict]:
     return sample_rows
 
 
+def cluster_job_response(job: dict) -> dict:
+    return {
+        "id": job["id"],
+        "status": job["status"],
+        "selected_count": job["selected_count"],
+        "warning_text": job.get("warning_text") or "",
+        "error_text": job.get("error_text") or "",
+        "created_at": job.get("created_at"),
+        "started_at": job.get("started_at"),
+        "completed_at": job.get("completed_at"),
+    }
+
+
+def build_grapetree_url(config: Config, request: Request, job: dict) -> str:
+    if not config.cluster.grapetree_url:
+        return ""
+    token = job["public_token"]
+    tree_url = str(request.url_for("cluster_public_artifact", public_token=token, artifact_key="grapetree.json"))
+    return f"{config.cluster.grapetree_url}?{urlencode({'tree': tree_url})}"
+
+
 def build_fasta_clipboard_content(config: Config, sample_rows: list[dict], output_key: str) -> str:
     chunks: list[str] = []
     connection = connect(config.database.path)
@@ -855,10 +897,20 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     config = load_config(config_path)
     from virtitta.importer import import_run as import_run_dir
     connection = connect(config.database.path)
-    init_db(connection)
-    connection.close()
+    try:
+        init_db(connection)
+        mark_stale_cluster_jobs_failed(connection)
+    finally:
+        connection.close()
 
-    app = FastAPI(title=config.app.title)
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        app.state.cluster_executor.shutdown(wait=False, cancel_futures=False)
+
+    app = FastAPI(title=config.app.title, lifespan=lifespan)
+    app.state.cluster_executor = ThreadPoolExecutor(max_workers=config.cluster.max_concurrent_jobs)
+
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.state.config = config
 
@@ -1082,6 +1134,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                     "sample_delete": permission_allowed(request, PERMISSION_SAMPLE_DELETE),
                 },
                 "webigv_enabled": webigv_enabled(config),
+                "cluster_enabled": config.cluster.enabled,
                 "qc_status_options": QC_STATUS_OPTIONS,
                 "summary": {
                     "total": len(rows),
@@ -1338,6 +1391,152 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return Response(
             content=build_fasta_clipboard_content(config, sample_rows, "export_iupac_fasta"),
             media_type="text/plain; charset=utf-8",
+        )
+
+    @app.post("/clusters")
+    async def create_cluster(
+        request: Request,
+        sample_run_id: list[str] = Form(default=[]),
+        redirect_to: str = Form(default="/"),
+        csrf_token: str = Form(default=""),
+    ):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        require_csrf(request, csrf_token)
+        if not config.cluster.enabled:
+            return RedirectResponse(
+                append_warning(redirect_to, "Cluster analysis is disabled."),
+                status_code=303,
+            )
+        if len(sample_run_id) < 2:
+            return RedirectResponse(
+                append_warning(redirect_to, "Select at least two samples for clustering."),
+                status_code=303,
+            )
+
+        job_id = secrets.token_urlsafe(12)
+        sample_rows = load_sample_rows(config, sample_run_id)
+        if len(sample_rows) < 2:
+            raise HTTPException(status_code=404, detail="No matching samples found")
+
+        connection = connect(config.database.path)
+        try:
+            try:
+                sample_records, warning_text = prepare_cluster_files(config, connection, sample_rows, job_id)
+                write_command_snapshot(config, job_id)
+            except ClusterError as exc:
+                return RedirectResponse(
+                    append_warning(redirect_to, str(exc)),
+                    status_code=303,
+                )
+
+            create_cluster_job(
+                connection,
+                {
+                    "id": job_id,
+                    "status": "queued",
+                    "created_at": utc_now(),
+                    "started_at": None,
+                    "completed_at": None,
+                    "selected_count": len(sample_rows),
+                    "warning_text": warning_text,
+                    "error_text": None,
+                    "output_relpath": job_id,
+                    "artifacts_json": json.dumps(cluster_artifacts(job_id), sort_keys=True),
+                    "config_json": json.dumps(command_config_snapshot(config), sort_keys=True),
+                    "public_token": secrets.token_urlsafe(24),
+                },
+                sample_records,
+            )
+        finally:
+            connection.close()
+
+        request.app.state.cluster_executor.submit(run_cluster_job, config, job_id)
+        return RedirectResponse(str(request.url_for("cluster_detail", job_id=job_id)), status_code=303)
+
+    @app.get("/clusters/{job_id}", response_class=HTMLResponse)
+    def cluster_detail(request: Request, job_id: str):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        connection = connect(config.database.path)
+        try:
+            job = get_cluster_job(connection, job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="Cluster job not found")
+            samples = get_cluster_job_samples(connection, job_id)
+        finally:
+            connection.close()
+
+        artifacts = json.loads(job.get("artifacts_json") or "{}")
+        return templates.TemplateResponse(
+            request,
+            "cluster_detail.html",
+            {
+                "request": request,
+                "config": config,
+                "job": job,
+                "samples": samples,
+                "artifacts": artifacts,
+                "status_url": str(request.url_for("cluster_status", job_id=job_id)),
+                "grapetree_url": build_grapetree_url(config, request, job) if job["status"] == "completed" else "",
+                "warning_message": "",
+                "notice_message": "",
+            },
+        )
+
+    @app.get("/clusters/{job_id}/status")
+    def cluster_status(request: Request, job_id: str):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        connection = connect(config.database.path)
+        try:
+            job = get_cluster_job(connection, job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="Cluster job not found")
+        finally:
+            connection.close()
+        return cluster_job_response(job)
+
+    @app.get("/clusters/{job_id}/artifacts/{artifact_key}")
+    def cluster_artifact(request: Request, job_id: str, artifact_key: str):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        connection = connect(config.database.path)
+        try:
+            job = get_cluster_job(connection, job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="Cluster job not found")
+        finally:
+            connection.close()
+        try:
+            normalized_artifact_key = CLUSTER_ARTIFACT_ALIASES.get(artifact_key, artifact_key)
+            if normalized_artifact_key == ARTIFACT_GRAPETREE_JSON:
+                ensure_grapetree_json(config, job)
+            file_path = artifact_path(config, job, artifact_key)
+        except ClusterError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return FileResponse(file_path, filename=file_path.name)
+
+    @app.get("/clusters/public/{public_token}/{artifact_key}", name="cluster_public_artifact")
+    def cluster_public_artifact(public_token: str, artifact_key: str):
+        normalized_artifact_key = CLUSTER_ARTIFACT_ALIASES.get(artifact_key, artifact_key)
+        if normalized_artifact_key not in PUBLIC_CLUSTER_ARTIFACTS:
+            raise HTTPException(status_code=404, detail="Cluster artifact is not public")
+        connection = connect(config.database.path)
+        try:
+            job = get_cluster_job_by_public_token(connection, public_token)
+            if job is None or job["status"] != "completed":
+                raise HTTPException(status_code=404, detail="Cluster job not found")
+        finally:
+            connection.close()
+        try:
+            if normalized_artifact_key == ARTIFACT_GRAPETREE_JSON:
+                ensure_grapetree_json(config, job)
+            file_path = artifact_path(config, job, normalized_artifact_key)
+        except ClusterError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return FileResponse(
+            file_path,
+            filename=file_path.name,
+            media_type="text/plain; charset=utf-8",
+            content_disposition_type="inline",
+            headers={"Access-Control-Allow-Origin": "*"},
         )
 
     @app.get("/samples/{sample_run_id}", response_class=HTMLResponse)

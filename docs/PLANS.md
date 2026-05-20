@@ -41,27 +41,6 @@ Next steps:
 - map LDAP/AD users or groups to Virtitta roles
 - document operational requirements once the local LDAP/AD details are known
 
-### Isolate Clustering
-
-Goal: add clustering from selected samples in the main table.
-
-Expected first implementation:
-
-- select samples in the main table
-- derive or export FASTA inputs
-- run trimming if needed
-- align with MAFFT
-- infer phylogeny with IQ-TREE 2
-- store outputs in a predictable configured location
-- expose tree viewing/downloading in the UI
-
-Keep this config-driven:
-
-- tool paths or container commands
-- working/output directories
-- enabled/disabled feature flag
-- virus-specific defaults if HCV-specific assumptions are introduced
-
 ### Documentation Audit
 
 Goal: keep the growing feature set discoverable.
@@ -89,6 +68,12 @@ Next steps:
 - keep at least one low-level ASGI test if it catches middleware redirects clearly
 
 ## Implemented Plans
+
+### Isolate Clustering V1
+
+Implemented selected-sample clustering behind `[cluster].enabled`. The first version prepares imported IUPAC FASTA
+records, trims with cutadapt, aligns with MAFFT, builds a tree with IQ-TREE 3, stores artifacts under a configured
+output root, and exposes downloads plus GrapeTree handoff links.
 
 ### webIGV Fallback
 

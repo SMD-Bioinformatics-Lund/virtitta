@@ -139,6 +139,9 @@
       <button type="submit" formaction="{{ request.url_for('bulk_remove_group') }}" formmethod="post" class="secondary">Remove group</button>
       {% endif %}
       {% if permissions.export_read %}
+      {% if cluster_enabled %}
+      <button type="submit" formaction="{{ request.url_for('create_cluster') }}" formmethod="post" class="secondary">Cluster selected</button>
+      {% endif %}
       <details class="action-menu">
         <summary>Export...</summary>
         <div class="action-menu-list">

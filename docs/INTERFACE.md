@@ -35,11 +35,25 @@ Common reviewer actions:
 - mark QC as `pass`, `fail`, or `unreviewed`
 - assign or clear sample category
 - add or remove a manual group
+- start a cluster analysis, when enabled
 - write server-side LIMS export
 - export browser download or clipboard-oriented data
 - delete samples, for admin users only
 
 Failing a sample requires a comment.
+
+## Clustering
+
+When clustering is enabled, `Cluster selected` starts a background job from the selected samples. At least two samples
+are required.
+
+The cluster detail page shows job status, warnings, selected sample IDs, and generated artifacts. The metadata file
+contains `ID` plus the configured main-table columns and comment count. Completed jobs expose downloads for the raw
+FASTA, prepared FASTA, alignment, Newick tree, metadata, command snapshot, and log. The Newick tree and metadata can
+also be copied to the clipboard.
+
+If a GrapeTree URL is configured, completed jobs show `Open GrapeTree`. The link passes a tokenized GrapeTree JSON
+payload containing the generated Newick tree and metadata table to the configured standalone GrapeTree instance.
 
 ## Exports
 

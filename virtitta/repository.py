@@ -282,6 +282,30 @@ def init_db(connection: sqlite3.Connection) -> None:
             PRIMARY KEY (sample_run_id, output_key)
         );
 
+        CREATE TABLE IF NOT EXISTS cluster_jobs (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            selected_count INTEGER NOT NULL,
+            warning_text TEXT,
+            error_text TEXT,
+            output_relpath TEXT NOT NULL,
+            artifacts_json TEXT NOT NULL DEFAULT '{}',
+            config_json TEXT NOT NULL DEFAULT '{}',
+            public_token TEXT NOT NULL UNIQUE
+        );
+
+        CREATE TABLE IF NOT EXISTS cluster_job_samples (
+            job_id TEXT NOT NULL REFERENCES cluster_jobs(id) ON DELETE CASCADE,
+            sample_run_id TEXT NOT NULL REFERENCES samples(sample_run_id) ON DELETE CASCADE,
+            tree_id TEXT NOT NULL,
+            display_identifier TEXT NOT NULL,
+            sort_order INTEGER NOT NULL,
+            PRIMARY KEY (job_id, sample_run_id)
+        );
+
         CREATE TABLE IF NOT EXISTS auth_users (
             username TEXT PRIMARY KEY,
             password_hash TEXT NOT NULL,
@@ -308,6 +332,9 @@ def init_db(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_group_memberships_group_name ON sample_group_memberships(group_name);
         CREATE INDEX IF NOT EXISTS idx_comments_sample_run_id ON sample_comments(sample_run_id);
         CREATE INDEX IF NOT EXISTS idx_output_cache_output_key ON output_cache(output_key);
+        CREATE INDEX IF NOT EXISTS idx_cluster_jobs_status ON cluster_jobs(status);
+        CREATE INDEX IF NOT EXISTS idx_cluster_jobs_public_token ON cluster_jobs(public_token);
+        CREATE INDEX IF NOT EXISTS idx_cluster_job_samples_job_id ON cluster_job_samples(job_id);
         CREATE INDEX IF NOT EXISTS idx_auth_sessions_username ON auth_sessions(username);
         """
     )
@@ -321,6 +348,109 @@ def init_db(connection: sqlite3.Connection) -> None:
     _ensure_column(connection, "samples", "variant_af_count_04", "INTEGER")
     _backfill_sequencing_dates(connection)
     connection.commit()
+
+
+def create_cluster_job(connection: sqlite3.Connection, job_record: dict, sample_records: list[dict]) -> None:
+    connection.execute(
+        """
+        INSERT INTO cluster_jobs (
+            id, status, created_at, started_at, completed_at, selected_count,
+            warning_text, error_text, output_relpath, artifacts_json, config_json, public_token
+        )
+        VALUES (
+            :id, :status, :created_at, :started_at, :completed_at, :selected_count,
+            :warning_text, :error_text, :output_relpath, :artifacts_json, :config_json, :public_token
+        )
+        """,
+        job_record,
+    )
+    connection.executemany(
+        """
+        INSERT INTO cluster_job_samples (
+            job_id, sample_run_id, tree_id, display_identifier, sort_order
+        )
+        VALUES (
+            :job_id, :sample_run_id, :tree_id, :display_identifier, :sort_order
+        )
+        """,
+        sample_records,
+    )
+    connection.commit()
+
+
+def get_cluster_job(connection: sqlite3.Connection, job_id: str) -> dict | None:
+    return _row_to_dict(
+        connection.execute(
+            "SELECT * FROM cluster_jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+    )
+
+
+def get_cluster_job_by_public_token(connection: sqlite3.Connection, public_token: str) -> dict | None:
+    return _row_to_dict(
+        connection.execute(
+            "SELECT * FROM cluster_jobs WHERE public_token = ?",
+            (public_token,),
+        ).fetchone()
+    )
+
+
+def get_cluster_job_samples(connection: sqlite3.Connection, job_id: str) -> list[dict]:
+    rows = connection.execute(
+        """
+        SELECT *
+        FROM cluster_job_samples
+        WHERE job_id = ?
+        ORDER BY sort_order
+        """,
+        (job_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_cluster_job_status(
+    connection: sqlite3.Connection,
+    job_id: str,
+    status: str,
+    *,
+    started_at: str | None = None,
+    completed_at: str | None = None,
+    warning_text: str | None = None,
+    error_text: str | None = None,
+    artifacts_json: str | None = None,
+) -> None:
+    connection.execute(
+        """
+        UPDATE cluster_jobs
+        SET
+            status = ?,
+            started_at = COALESCE(?, started_at),
+            completed_at = COALESCE(?, completed_at),
+            warning_text = COALESCE(?, warning_text),
+            error_text = COALESCE(?, error_text),
+            artifacts_json = COALESCE(?, artifacts_json)
+        WHERE id = ?
+        """,
+        (status, started_at, completed_at, warning_text, error_text, artifacts_json, job_id),
+    )
+    connection.commit()
+
+
+def mark_stale_cluster_jobs_failed(connection: sqlite3.Connection) -> int:
+    now = utc_now()
+    cursor = connection.execute(
+        """
+        UPDATE cluster_jobs
+        SET status = 'failed',
+            completed_at = ?,
+            error_text = 'Server restarted before this job completed.'
+        WHERE status IN ('queued', 'running')
+        """,
+        (now,),
+    )
+    connection.commit()
+    return cursor.rowcount
 
 
 def backfill_variant_af_counts(connection: sqlite3.Connection) -> int:

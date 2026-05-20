@@ -115,6 +115,24 @@ class WebIgvSettings:
 
 
 @dataclass(frozen=True)
+class ClusterSettings:
+    enabled: bool = False
+    output_root: Path | None = None
+    grapetree_url: str = ""
+    max_concurrent_jobs: int = 1
+    timeout_seconds: int = 3600
+    input_output_key: str = "export_iupac_fasta"
+    header_suffix_to_strip: str = "-0.15-iupac"
+    five_prime_trim: int = 50
+    poly_a: bool = True
+    cutadapt_command: str = "cutadapt"
+    mafft_command: str = "mafft"
+    iqtree_command: str = "iqtree3"
+    mafft_args: list[str] = field(default_factory=lambda: ["--auto"])
+    iqtree_args: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class FeatureSettings:
     comments: bool = True
     bulk_qc: bool = True
@@ -172,6 +190,7 @@ class Config:
     database: DatabaseSettings
     igv: IgvSettings
     webigv: WebIgvSettings
+    cluster: ClusterSettings
     features: FeatureSettings
     annotations: AnnotationSettings
     exports: ExportSettings
@@ -254,6 +273,12 @@ def load_config(config_path: str | Path | None = None) -> Config:
     db_raw = raw.get("database", {})
     igv_raw = raw.get("igv", {})
     webigv_raw = raw.get("webigv", {})
+    cluster_raw = raw.get("cluster", {})
+    cluster_mafft_args = (
+        _normalize_string_list(cluster_raw["mafft_args"])
+        if "mafft_args" in cluster_raw
+        else ["--auto"]
+    )
     features_raw = raw.get("features", {})
     annotations_raw = raw.get("annotations", {})
     exports_raw = raw.get("exports", {})
@@ -293,6 +318,26 @@ def load_config(config_path: str | Path | None = None) -> Config:
         webigv=WebIgvSettings(
             enabled=bool(webigv_raw.get("enabled", False)),
             igv_js_url=str(webigv_raw.get("igv_js_url", "/static/igv.min.js")),
+        ),
+        cluster=ClusterSettings(
+            enabled=bool(cluster_raw.get("enabled", False)),
+            output_root=(
+                (base_dir / cluster_raw.get("output_root", "data/clusters")).resolve()
+                if not Path(cluster_raw.get("output_root", "data/clusters")).is_absolute()
+                else Path(cluster_raw.get("output_root", "data/clusters"))
+            ),
+            grapetree_url=str(cluster_raw.get("grapetree_url", "")),
+            max_concurrent_jobs=max(1, int(cluster_raw.get("max_concurrent_jobs", 1))),
+            timeout_seconds=max(1, int(cluster_raw.get("timeout_seconds", 3600))),
+            input_output_key=str(cluster_raw.get("input_output_key", "export_iupac_fasta")),
+            header_suffix_to_strip=str(cluster_raw.get("header_suffix_to_strip", "-0.15-iupac")),
+            five_prime_trim=max(0, int(cluster_raw.get("five_prime_trim", 50))),
+            poly_a=bool(cluster_raw.get("poly_a", True)),
+            cutadapt_command=str(cluster_raw.get("cutadapt_command", "cutadapt")),
+            mafft_command=str(cluster_raw.get("mafft_command", "mafft")),
+            iqtree_command=str(cluster_raw.get("iqtree_command", "iqtree3")),
+            mafft_args=cluster_mafft_args,
+            iqtree_args=_normalize_string_list(cluster_raw.get("iqtree_args", [])),
         ),
         features=FeatureSettings(
             comments=bool(features_raw.get("comments", True)),

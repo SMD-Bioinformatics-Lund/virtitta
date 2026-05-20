@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 from starlette.requests import Request
 
 from virtitta.app import (
+    build_grapetree_url,
     build_fasta_clipboard_content,
     build_igv_goto_url,
     build_igv_url,
@@ -31,6 +32,7 @@ from virtitta.app import (
 from virtitta.artifact_cache import CACHE_OK, CACHE_STALE, verify_sample_cache
 from virtitta.auth import create_login_session, hash_password
 from virtitta.cli import build_parser
+from virtitta.cluster import ClusterError, cluster_artifacts, prepare_cluster_files, run_cluster_job
 from virtitta.config import load_config
 from virtitta.importer import MANUAL_FAILED_RUN_NAME, import_run, import_sample
 from virtitta.repository import (
@@ -39,6 +41,9 @@ from virtitta.repository import (
     backfill_variant_af_counts,
     connect,
     create_auth_user,
+    create_cluster_job,
+    get_cluster_job,
+    get_cluster_job_samples,
     get_comments,
     get_output_cache_entry,
     get_sample,
@@ -52,6 +57,7 @@ from virtitta.repository import (
     set_sample_category,
     set_sample_field_overrides,
     update_qc_status,
+    utc_now,
 )
 
 
@@ -169,6 +175,79 @@ class VirtittaSmokeTests(unittest.TestCase):
                 "enabled = true\n"
                 'igv_js_url = "/static/igv.min.js"\n'
             )
+
+    def enable_cluster(
+        self,
+        *,
+        cutadapt_command: str = "cutadapt",
+        mafft_command: str = "mafft",
+        iqtree_command: str = "iqtree3",
+    ) -> None:
+        with self.config_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                "\n"
+                "[cluster]\n"
+                "enabled = true\n"
+                f'output_root = "{(self.tmp_path / "clusters").as_posix()}"\n'
+                'grapetree_url = "https://mtlucmds1.lund.skane.se/grapetree/"\n'
+                "max_concurrent_jobs = 1\n"
+                "timeout_seconds = 60\n"
+                'input_output_key = "export_iupac_fasta"\n'
+                'header_suffix_to_strip = "-0.15-iupac"\n'
+                "five_prime_trim = 50\n"
+                "poly_a = true\n"
+                f'cutadapt_command = "{cutadapt_command}"\n'
+                f'mafft_command = "{mafft_command}"\n'
+                f'iqtree_command = "{iqtree_command}"\n'
+                'mafft_args = ["--auto"]\n'
+                "iqtree_args = []\n"
+            )
+
+    def add_second_sample_summary(self, *, subtype: str = "1a", tree_id: str = "LID002-0.15-iupac") -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))[0]
+        sample = json.loads(json.dumps(fixture))
+        sample["sample_id"] = "SAMPLE002"
+        sample["sample_run_id"] = "SAMPLE002_fixture_run"
+        sample["lid"] = "LID002"
+        sample["typing"]["report_subtype"] = subtype
+        sample["outputs"]["export_iupac_fasta"] = "lid/LID002-0.15-iupac.fasta"
+        self.write_sample_summary(sample)
+        sample2_lid_dir = self.run_dir / "SAMPLE002" / "results" / "lid"
+        sample2_lid_dir.mkdir(parents=True, exist_ok=True)
+        (sample2_lid_dir / "LID002-0.15-iupac.fasta").write_text(
+            f">{tree_id}\nACGTAAAA\n",
+            encoding="utf-8",
+        )
+
+    def write_fake_cluster_tools(self) -> tuple[Path, Path, Path]:
+        bin_dir = self.tmp_path / "bin"
+        bin_dir.mkdir()
+        cutadapt = bin_dir / "cutadapt"
+        mafft = bin_dir / "mafft"
+        iqtree = bin_dir / "iqtree3"
+        cutadapt.write_text(
+            "#!/usr/bin/env python3\n"
+            "import shutil, sys\n"
+            "out = sys.argv[sys.argv.index('-o') + 1]\n"
+            "shutil.copyfile(sys.argv[-1], out)\n",
+            encoding="utf-8",
+        )
+        mafft.write_text(
+            "#!/usr/bin/env python3\n"
+            "import pathlib, sys\n"
+            "print(pathlib.Path(sys.argv[-1]).read_text(), end='')\n",
+            encoding="utf-8",
+        )
+        iqtree.write_text(
+            "#!/usr/bin/env python3\n"
+            "import pathlib, sys\n"
+            "prefix = pathlib.Path(sys.argv[sys.argv.index('-pre') + 1])\n"
+            "prefix.with_suffix('.treefile').write_text('(LID001:0.1,LID002:0.1);\\n')\n",
+            encoding="utf-8",
+        )
+        for tool in (cutadapt, mafft, iqtree):
+            tool.chmod(0o755)
+        return cutadapt, mafft, iqtree
 
     def create_local_user(self, username: str, role: str, password: str = "secret") -> None:
         config = load_config(self.config_path)
@@ -1470,6 +1549,209 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("/samples/{sample_run_id}/webigv", route_paths)
         self.assertIn("/samples/{sample_run_id}/webigv/files/{output_key}", route_paths)
         self.assertIn("/samples/{sample_run_id}/webigv/files/{output_key}/{filename}", route_paths)
+
+    def test_cluster_config_parses_defaults_and_grapetree_url(self) -> None:
+        self.enable_cluster()
+        config = load_config(self.config_path)
+
+        self.assertTrue(config.cluster.enabled)
+        self.assertEqual(config.cluster.output_root, self.tmp_path / "clusters")
+        self.assertEqual(config.cluster.grapetree_url, "https://mtlucmds1.lund.skane.se/grapetree/")
+        self.assertEqual(config.cluster.input_output_key, "export_iupac_fasta")
+        self.assertEqual(config.cluster.iqtree_command, "iqtree3")
+        self.assertEqual(config.cluster.mafft_args, ["--auto"])
+
+    def test_prepare_cluster_files_strips_header_suffix_and_writes_metadata(self) -> None:
+        self.enable_cluster()
+        self.add_second_sample_summary(subtype="1a")
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            rows = [
+                get_sample(conn, "SAMPLE001_fixture_run"),
+                get_sample(conn, "SAMPLE002_fixture_run"),
+            ]
+            sample_records, warning_text = prepare_cluster_files(config, conn, rows, "job1")
+        finally:
+            conn.close()
+
+        self.assertEqual([record["tree_id"] for record in sample_records], ["LID001", "LID002"])
+        self.assertIn("multiple subtypes", warning_text)
+        prepared_input = (config.cluster.output_root / "job1" / "input.raw.fasta").read_text(encoding="utf-8")
+        metadata = (config.cluster.output_root / "job1" / "metadata.tsv").read_text(encoding="utf-8")
+        self.assertIn(">LID001\nARYT\n", prepared_input)
+        self.assertIn(">LID002\nACGTAAAA\n", prepared_input)
+        self.assertIn("ID\tlid\tsample_id\tsequencing_date\tgenerated_date\tsample_category\tqc_status\tmanual_groups", metadata)
+        self.assertIn("typing_report_subtype\ttyping_main_blast_identity\tresistance_summary", metadata)
+        self.assertIn("comment_count", metadata)
+        self.assertIn("LID002\tLID002\tSAMPLE002\t2026-04-08\t2026-04-08\t\tunreviewed\t\t1a", metadata)
+
+    def test_prepare_cluster_files_blocks_duplicate_normalized_tree_ids(self) -> None:
+        self.enable_cluster()
+        self.add_second_sample_summary(tree_id="LID001-0.15-iupac")
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            rows = [
+                get_sample(conn, "SAMPLE001_fixture_run"),
+                get_sample(conn, "SAMPLE002_fixture_run"),
+            ]
+            with self.assertRaisesRegex(ClusterError, "Duplicate FASTA tree ID"):
+                prepare_cluster_files(config, conn, rows, "job1")
+        finally:
+            conn.close()
+
+    def test_run_cluster_job_uses_configured_tools_and_completes(self) -> None:
+        cutadapt, mafft, iqtree = self.write_fake_cluster_tools()
+        self.enable_cluster(
+            cutadapt_command=cutadapt.as_posix(),
+            mafft_command=mafft.as_posix(),
+            iqtree_command=iqtree.as_posix(),
+        )
+        self.add_second_sample_summary(subtype="3a")
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            rows = [
+                get_sample(conn, "SAMPLE001_fixture_run"),
+                get_sample(conn, "SAMPLE002_fixture_run"),
+            ]
+            sample_records, warning_text = prepare_cluster_files(config, conn, rows, "job1")
+            create_cluster_job(
+                conn,
+                {
+                    "id": "job1",
+                    "status": "queued",
+                    "created_at": utc_now(),
+                    "started_at": None,
+                    "completed_at": None,
+                    "selected_count": 2,
+                    "warning_text": warning_text,
+                    "error_text": None,
+                    "output_relpath": "job1",
+                    "artifacts_json": json.dumps(cluster_artifacts("job1"), sort_keys=True),
+                    "config_json": "{}",
+                    "public_token": "public-token",
+                },
+                sample_records,
+            )
+        finally:
+            conn.close()
+
+        run_cluster_job(config, "job1")
+
+        conn = connect(config.database.path)
+        try:
+            job = get_cluster_job(conn, "job1")
+            samples = get_cluster_job_samples(conn, "job1")
+        finally:
+            conn.close()
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["error_text"], None)
+        self.assertEqual([sample["tree_id"] for sample in samples], ["LID001", "LID002"])
+        self.assertEqual(
+            (config.cluster.output_root / "job1" / "iqtree.treefile").read_text(encoding="utf-8"),
+            "(LID001:0.1,LID002:0.1);\n",
+        )
+        grapetree = json.loads((config.cluster.output_root / "job1" / "grapetree.json").read_text(encoding="utf-8"))
+        self.assertEqual(grapetree["nwk"], "(LID001:0.1,LID002:0.1);")
+        self.assertEqual(grapetree["layout_algorithm"], "greedy")
+        self.assertEqual(sorted(grapetree["metadata"]), ["LID001", "LID002"])
+        self.assertIn("sample_category", grapetree["metadata_options"])
+        self.assertIn("$", (config.cluster.output_root / "job1" / "cluster.log").read_text(encoding="utf-8"))
+
+    def test_cluster_routes_are_registered_and_grapetree_url_uses_public_artifacts(self) -> None:
+        self.enable_cluster()
+        config = load_config(self.config_path)
+        conn = connect(config.database.path)
+        try:
+            init_db(conn)
+            create_cluster_job(
+                conn,
+                {
+                    "id": "job1",
+                    "status": "completed",
+                    "created_at": utc_now(),
+                    "started_at": utc_now(),
+                    "completed_at": utc_now(),
+                    "selected_count": 2,
+                    "warning_text": None,
+                    "error_text": None,
+                    "output_relpath": "job1",
+                    "artifacts_json": json.dumps(cluster_artifacts("job1"), sort_keys=True),
+                    "config_json": "{}",
+                    "public_token": "public-token",
+                },
+                [],
+            )
+        finally:
+            conn.close()
+        app = create_app(self.config_path)
+        request = self.make_request(app)
+        job = {"id": "job1", "status": "completed", "public_token": "public-token", "selected_count": 2}
+        grapetree_url = build_grapetree_url(config, request, job)
+        route_paths = {route.path for route in app.routes}
+        detail_route = next(route for route in app.routes if getattr(route, "path", None) == "/clusters/{job_id}")
+        detail_response = detail_route.endpoint(request, "job1")
+        public_route = next(
+            route for route in app.routes if getattr(route, "path", None) == "/clusters/public/{public_token}/{artifact_key}"
+        )
+        artifact_dir = config.cluster.output_root / "job1"
+        artifact_dir.mkdir(parents=True)
+        (artifact_dir / "iqtree.treefile").write_text("(LID001:0.1);\n", encoding="utf-8")
+        (artifact_dir / "metadata.tsv").write_text("ID\tlid\nLID001\tLID001\n", encoding="utf-8")
+        (artifact_dir / "grapetree.json").write_text('{"nwk":"(LID001:0.1);","metadata":{}}\n', encoding="utf-8")
+        public_metadata_response = public_route.endpoint("public-token", "metadata.txt")
+        public_grapetree_response = public_route.endpoint("public-token", "grapetree.json")
+
+        self.assertIn("/clusters", route_paths)
+        self.assertIn("/clusters/{job_id}", route_paths)
+        self.assertIn("/clusters/{job_id}/artifacts/{artifact_key}", route_paths)
+        self.assertIn("/clusters/public/{public_token}/{artifact_key}", route_paths)
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(public_metadata_response.media_type, "text/plain; charset=utf-8")
+        self.assertEqual(public_grapetree_response.media_type, "text/plain; charset=utf-8")
+        self.assertIn("Cluster job1", detail_response.body.decode("utf-8"))
+        self.assertTrue(grapetree_url.startswith("https://mtlucmds1.lund.skane.se/grapetree/?"))
+        self.assertIn("tree=http%3A%2F%2Ftestserver%2Fclusters%2Fpublic%2Fpublic-token%2Fgrapetree.json", grapetree_url)
+        self.assertNotIn("metadata=", grapetree_url)
+
+    def test_cluster_detail_renders_queued_job_status_script(self) -> None:
+        self.enable_cluster()
+        config = load_config(self.config_path)
+        app = create_app(self.config_path)
+        conn = connect(config.database.path)
+        try:
+            create_cluster_job(
+                conn,
+                {
+                    "id": "job1",
+                    "status": "queued",
+                    "created_at": utc_now(),
+                    "started_at": None,
+                    "completed_at": None,
+                    "selected_count": 2,
+                    "warning_text": None,
+                    "error_text": None,
+                    "output_relpath": "job1",
+                    "artifacts_json": json.dumps(cluster_artifacts("job1"), sort_keys=True),
+                    "config_json": "{}",
+                    "public_token": "public-token",
+                },
+                [],
+            )
+        finally:
+            conn.close()
+        route = next(route for route in app.routes if getattr(route, "path", None) == "/clusters/{job_id}")
+        response = route.endpoint(self.make_request(app), "job1")
+
+        self.assertEqual(response.status_code, 200)
+        rendered = response.body.decode("utf-8")
+        self.assertIn("Cluster job1", rendered)
+        self.assertIn('const statusUrl = "http://testserver/clusters/job1/status";', rendered)
 
     def test_list_samples_supports_subtype_and_numeric_filters(self) -> None:
         config = load_config(self.config_path)

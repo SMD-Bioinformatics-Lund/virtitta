@@ -33,6 +33,7 @@ Important sections:
 - `[cache]`: local cache for small imported artifacts
 - `[auth]`: optional local login and session settings
 - `[webigv]`: optional browser IGV fallback settings
+- `[cluster]`: optional selected-sample clustering settings
 - `[ui]`: table columns, defaults, labels, width caps, and highlight rules
 
 Start from `virtitta.example.toml` for new deployments.
@@ -66,6 +67,43 @@ serves the matching FASTA, FAI, CRAM, and CRAI files from the imported QC JSON. 
 browser genome object for an empty reference slice during CRAM decoding, which produces a false mismatch with calculated
 MD5 `d41d8cd98f00b204e9800998ecf8427e`. Use the imported files or samtools if you need to audit CRAM/reference
 integrity outside the browser.
+
+## Cluster Configuration
+
+Selected-sample clustering is disabled by default. Enable it only when the Virtitta server can execute `cutadapt`,
+`mafft`, and `iqtree3` from the configured commands:
+
+```toml
+[cluster]
+enabled = true
+output_root = "data/clusters"
+grapetree_url = "https://mtlucmds1.lund.skane.se/grapetree/"
+max_concurrent_jobs = 1
+timeout_seconds = 3600
+input_output_key = "export_iupac_fasta"
+header_suffix_to_strip = "-0.15-iupac"
+five_prime_trim = 50
+poly_a = true
+cutadapt_command = "cutadapt"
+mafft_command = "mafft"
+iqtree_command = "iqtree3"
+mafft_args = ["--auto"]
+iqtree_args = []
+```
+
+For the local conda workflow, install the command-line tools into the same environment that runs Virtitta:
+
+```bash
+micromamba install -c conda-forge -c bioconda cutadapt mafft iqtree
+```
+
+V1 uses the imported `export_iupac_fasta` output for each selected sample, removes the configured FASTA header suffix,
+runs `cutadapt --poly-a -u 50`, aligns with MAFFT, then runs IQ-TREE 3. Cluster artifacts are written under
+`cluster.output_root`; queued or running jobs are marked failed on server restart.
+
+The GrapeTree handoff uses a `tree=` URL parameter with a tokenized public link to `grapetree.json`. That JSON embeds
+the completed Newick tree and metadata table, avoiding the stricter separate metadata URL loader in some GrapeTree
+deployments. Tokenized public artifact routes expose the completed tree, metadata, and GrapeTree JSON files only.
 
 ## Core Commands
 

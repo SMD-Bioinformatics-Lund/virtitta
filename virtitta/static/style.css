@@ -120,6 +120,15 @@ a:hover {
   font-weight: 600;
 }
 
+.warning-inline {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border: 1px solid #d3b861;
+  background: var(--warn);
+  font-size: 0.9rem;
+  white-space: pre-line;
+}
+
 .toast-region {
   position: absolute;
   top: 50%;
@@ -350,6 +359,11 @@ a:hover {
 
 .split-header {
   justify-content: space-between;
+}
+
+h2,
+h3 {
+  margin: 0;
 }
 
 .comment-head {
