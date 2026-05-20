@@ -15,6 +15,12 @@ cd ~/git/virtitta
 Use `PYTHONPATH=$PWD python -m virtitta.cli ...` from the repository checkout, or install the package and use the
 `virtitta` console script.
 
+For a fresh checkout, install the Python package into the active environment:
+
+```bash
+pip install -e .
+```
+
 ## Configuration
 
 Runtime configuration is read from `virtitta.toml`.
