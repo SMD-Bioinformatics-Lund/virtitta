@@ -17,7 +17,7 @@ igv_js_url = "/static/igv.min.js"
 [cluster]
 enabled = true
 output_root = "data/clusters"
-grapetree_url = "https://mtlucmds1.lund.skane.se/grapetree/"
+grapetree_url = "http://mtlucmds1.lund.skane.se/grapetree/"
 public_base_url = ""
 max_concurrent_jobs = 1
 timeout_seconds = 3600
