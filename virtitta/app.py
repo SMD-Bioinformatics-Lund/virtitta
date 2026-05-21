@@ -241,6 +241,10 @@ def table_columns(config: Config) -> list[str]:
     return list(config.ui.table_columns)
 
 
+def is_public_request_path(path: str) -> bool:
+    return path == "/login" or path.startswith("/static/") or path.startswith("/clusters/public/")
+
+
 def column_visibility_storage_key(config: Config) -> str:
     payload = {
         "table_columns": config.ui.table_columns,
@@ -942,8 +946,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
         request.state.current_user = get_user_from_cookie(config, request.cookies.get(config.auth.cookie_name))
         path = request.url.path
-        is_public_path = path == "/login" or path.startswith("/static/")
-        if request.state.current_user is None and not is_public_path:
+        if request.state.current_user is None and not is_public_request_path(path):
             if request.method in {"GET", "HEAD"}:
                 next_url = request.url.path
                 if request.url.query:

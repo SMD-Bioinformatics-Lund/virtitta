@@ -26,6 +26,7 @@ from virtitta.app import (
     comment_link_label,
     create_app,
     format_value,
+    is_public_request_path,
     override_comment_text,
     table_columns,
 )
@@ -2133,6 +2134,11 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertEqual(start["status"], 303)
         self.assertIn("/login?next=%2F", headers["location"])
+
+    def test_auth_public_path_exemption_includes_cluster_artifacts(self) -> None:
+        self.assertTrue(is_public_request_path("/clusters/public/public-token/grapetree.json"))
+        self.assertTrue(is_public_request_path("/clusters/public/public-token/metadata.txt"))
+        self.assertFalse(is_public_request_path("/clusters/job1"))
 
     def test_viewer_login_can_view_but_not_see_mutating_controls(self) -> None:
         self.enable_auth()
