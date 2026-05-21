@@ -1680,6 +1680,12 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("--poly-t-min-length 10", log_text)
         self.assertIn("--poly-t-seed-length 12", log_text)
         self.assertIn("--poly-t-seed-min-t 10", log_text)
+        self.assertIn("prepare-fasta summary:", log_text)
+        self.assertIn("records: 2", log_text)
+        self.assertIn("five-prime trim: disabled, 0 records, 0 bases", log_text)
+        self.assertIn("poly-T trim: enabled, 1/2 records, 16 bases (0 exact-run, 1 fuzzy-seed)", log_text)
+        self.assertIn("poly-T trim lengths: min=16, median=16, max=16", log_text)
+        self.assertIn("poly-T event: LID002 19 -> 3 (-16 bases, fuzzy-seed)", log_text)
         self.assertIn("-T 4", log_text)
 
     def test_cluster_routes_are_registered_and_grapetree_url_uses_public_artifacts(self) -> None:

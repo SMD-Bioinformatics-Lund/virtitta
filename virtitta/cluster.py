@@ -5,7 +5,7 @@ import io
 import json
 import re
 import subprocess
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from virtitta.artifact_cache import get_cached_output_file
@@ -40,6 +40,24 @@ CLUSTER_ARTIFACT_ALIASES = {
 
 class ClusterError(RuntimeError):
     pass
+
+
+@dataclass
+class PolyTTrimResult:
+    sequence: str
+    method: str | None = None
+
+
+@dataclass
+class FastaPrepStats:
+    record_count: int = 0
+    five_prime_trimmed_records: int = 0
+    five_prime_trimmed_bases: int = 0
+    poly_t_trimmed_records: int = 0
+    poly_t_trimmed_bases: int = 0
+    poly_t_exact_records: int = 0
+    poly_t_fuzzy_records: int = 0
+    poly_t_events: list[dict[str, str | int]] = field(default_factory=list)
 
 
 def cluster_output_dir(config: Config, output_relpath: str) -> Path:
@@ -140,14 +158,14 @@ def _trim_poly_t_tail(
     seed_length: int,
     seed_min_t: int,
     max_trailing_bases: int,
-) -> str:
+) -> PolyTTrimResult:
     if len(sequence) < min_length:
-        return sequence
+        return PolyTTrimResult(sequence)
 
     sequence_upper = sequence.upper()
     for match in re.finditer(f"T{{{min_length},}}", sequence_upper):
         if len(sequence) - match.end() <= max_trailing_bases:
-            return sequence[: match.start()]
+            return PolyTTrimResult(sequence[: match.start()], "exact-run")
 
     seed_length = max(seed_length, min_length)
     seed_min_t = min(seed_min_t, seed_length)
@@ -157,24 +175,86 @@ def _trim_poly_t_tail(
         if trailing_bases > max_trailing_bases:
             continue
         if sequence_upper[index] == "T" and sequence_upper[index : index + seed_length].count("T") >= seed_min_t:
-            return sequence[:index]
-    return sequence
+            return PolyTTrimResult(sequence[:index], "fuzzy-seed")
+    return PolyTTrimResult(sequence)
 
 
-def _write_prepared_fasta(config: Config, input_fasta: Path, prepared_fasta: Path) -> None:
+def _write_prepared_fasta(config: Config, input_fasta: Path, prepared_fasta: Path) -> FastaPrepStats:
+    stats = FastaPrepStats()
     with prepared_fasta.open("w", encoding="utf-8") as handle:
         for header, sequence in _iter_fasta_records(input_fasta):
+            stats.record_count += 1
             if config.cluster.five_prime_trim:
+                trim_bases = min(len(sequence), config.cluster.five_prime_trim)
                 sequence = sequence[config.cluster.five_prime_trim :]
+                if trim_bases:
+                    stats.five_prime_trimmed_records += 1
+                    stats.five_prime_trimmed_bases += trim_bases
             if config.cluster.poly_t:
-                sequence = _trim_poly_t_tail(
+                original_length = len(sequence)
+                trim_result = _trim_poly_t_tail(
                     sequence,
                     min_length=config.cluster.poly_t_min_length,
                     seed_length=config.cluster.poly_t_seed_length,
                     seed_min_t=config.cluster.poly_t_seed_min_t,
                     max_trailing_bases=config.cluster.poly_t_max_trailing_bases,
                 )
+                sequence = trim_result.sequence
+                trimmed_bases = original_length - len(sequence)
+                if trimmed_bases:
+                    stats.poly_t_trimmed_records += 1
+                    stats.poly_t_trimmed_bases += trimmed_bases
+                    if trim_result.method == "exact-run":
+                        stats.poly_t_exact_records += 1
+                    elif trim_result.method == "fuzzy-seed":
+                        stats.poly_t_fuzzy_records += 1
+                    stats.poly_t_events.append(
+                        {
+                            "header": header,
+                            "method": trim_result.method or "unknown",
+                            "before": original_length,
+                            "after": len(sequence),
+                            "trimmed_bases": trimmed_bases,
+                        }
+                    )
             handle.write(f">{header}\n{sequence}\n")
+    return stats
+
+
+def _write_fasta_prep_log_summary(log_handle, config: Config, stats: FastaPrepStats) -> None:
+    log_handle.write("prepare-fasta summary:\n")
+    log_handle.write(f"  records: {stats.record_count}\n")
+    five_prime_state = "enabled" if config.cluster.five_prime_trim else "disabled"
+    log_handle.write(
+        "  five-prime trim:"
+        f" {five_prime_state}, {stats.five_prime_trimmed_records} records,"
+        f" {stats.five_prime_trimmed_bases} bases\n"
+    )
+    if not config.cluster.poly_t:
+        log_handle.write("  poly-T trim: disabled\n")
+        return
+
+    log_handle.write(
+        "  poly-T trim:"
+        f" enabled, {stats.poly_t_trimmed_records}/{stats.record_count} records,"
+        f" {stats.poly_t_trimmed_bases} bases"
+        f" ({stats.poly_t_exact_records} exact-run, {stats.poly_t_fuzzy_records} fuzzy-seed)\n"
+    )
+    if not stats.poly_t_events:
+        log_handle.write("  poly-T events: none\n")
+        return
+    trim_lengths = sorted(int(event["trimmed_bases"]) for event in stats.poly_t_events)
+    median = trim_lengths[len(trim_lengths) // 2]
+    log_handle.write(
+        "  poly-T trim lengths:"
+        f" min={trim_lengths[0]}, median={median}, max={trim_lengths[-1]}\n"
+    )
+    for event in stats.poly_t_events:
+        log_handle.write(
+            "  poly-T event:"
+            f" {event['header']} {event['before']} -> {event['after']}"
+            f" (-{event['trimmed_bases']} bases, {event['method']})\n"
+        )
 
 
 def normalized_tree_id(header: str, suffix_to_strip: str) -> str:
@@ -403,7 +483,8 @@ def run_cluster_job(config: Config, job_id: str) -> None:
                 f" --poly-t-max-trailing-bases {config.cluster.poly_t_max_trailing_bases}"
                 f" {input_fasta} {prepared_fasta}\n"
             )
-            _write_prepared_fasta(config, input_fasta, prepared_fasta)
+            prep_stats = _write_prepared_fasta(config, input_fasta, prepared_fasta)
+            _write_fasta_prep_log_summary(log_handle, config, prep_stats)
 
             mafft_argv = [config.cluster.mafft_command, *config.cluster.mafft_args, str(prepared_fasta)]
             _run_command(
