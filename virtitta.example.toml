@@ -18,6 +18,7 @@ igv_js_url = "/static/igv.min.js"
 enabled = false
 output_root = "data/clusters"
 grapetree_url = ""
+public_base_url = ""
 max_concurrent_jobs = 1
 timeout_seconds = 3600
 input_output_key = "export_iupac_fasta"

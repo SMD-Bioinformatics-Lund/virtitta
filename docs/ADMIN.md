@@ -78,6 +78,7 @@ Selected-sample clustering is disabled by default. Enable it only when the Virti
 enabled = true
 output_root = "data/clusters"
 grapetree_url = "https://mtlucmds1.lund.skane.se/grapetree/"
+public_base_url = "https://virtitta.example.org"
 max_concurrent_jobs = 1
 timeout_seconds = 3600
 input_output_key = "export_iupac_fasta"
@@ -104,6 +105,10 @@ runs `cutadapt --poly-a -u 50`, aligns with MAFFT, then runs IQ-TREE 3. Cluster 
 The GrapeTree handoff uses a `tree=` URL parameter with a tokenized public link to `grapetree.json`. That JSON embeds
 the completed Newick tree and metadata table, avoiding the stricter separate metadata URL loader in some GrapeTree
 deployments. Tokenized public artifact routes expose the completed tree, metadata, and GrapeTree JSON files only.
+
+Set `cluster.public_base_url` on deployed servers when the request host seen by Virtitta is not reachable by the
+GrapeTree server. For example, if Virtitta runs behind a tunnel or reverse proxy, this must be the external Virtitta
+origin, not `http://127.0.0.1:8000`.
 
 ## Core Commands
 

@@ -651,7 +651,12 @@ def build_grapetree_url(config: Config, request: Request, job: dict) -> str:
     if not config.cluster.grapetree_url:
         return ""
     token = job["public_token"]
-    tree_url = str(request.url_for("cluster_public_artifact", public_token=token, artifact_key="grapetree.json"))
+    generated_url = str(request.url_for("cluster_public_artifact", public_token=token, artifact_key="grapetree.json"))
+    if config.cluster.public_base_url:
+        generated_path = urlsplit(generated_url).path
+        tree_url = f"{config.cluster.public_base_url}{generated_path}"
+    else:
+        tree_url = generated_url
     return f"{config.cluster.grapetree_url}?{urlencode({'tree': tree_url})}"
 
 

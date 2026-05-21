@@ -183,7 +183,9 @@ class VirtittaSmokeTests(unittest.TestCase):
         cutadapt_command: str = "cutadapt",
         mafft_command: str = "mafft",
         iqtree_command: str = "iqtree3",
+        public_base_url: str = "",
     ) -> None:
+        public_base_url_line = f'public_base_url = "{public_base_url}"\n' if public_base_url else ""
         with self.config_path.open("a", encoding="utf-8") as handle:
             handle.write(
                 "\n"
@@ -191,6 +193,7 @@ class VirtittaSmokeTests(unittest.TestCase):
                 "enabled = true\n"
                 f'output_root = "{(self.tmp_path / "clusters").as_posix()}"\n'
                 'grapetree_url = "https://mtlucmds1.lund.skane.se/grapetree/"\n'
+                f"{public_base_url_line}"
                 "max_concurrent_jobs = 1\n"
                 "timeout_seconds = 60\n"
                 'input_output_key = "export_iupac_fasta"\n'
@@ -1558,6 +1561,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertTrue(config.cluster.enabled)
         self.assertEqual(config.cluster.output_root, self.tmp_path / "clusters")
         self.assertEqual(config.cluster.grapetree_url, "https://mtlucmds1.lund.skane.se/grapetree/")
+        self.assertEqual(config.cluster.public_base_url, "")
         self.assertEqual(config.cluster.input_output_key, "export_iupac_fasta")
         self.assertEqual(config.cluster.iqtree_command, "iqtree3")
         self.assertEqual(config.cluster.mafft_args, ["--auto"])
@@ -1719,6 +1723,20 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertTrue(grapetree_url.startswith("https://mtlucmds1.lund.skane.se/grapetree/?"))
         self.assertIn("tree=http%3A%2F%2Ftestserver%2Fclusters%2Fpublic%2Fpublic-token%2Fgrapetree.json", grapetree_url)
         self.assertNotIn("metadata=", grapetree_url)
+
+    def test_grapetree_url_uses_configured_public_base_url(self) -> None:
+        self.enable_cluster(public_base_url="https://virtitta.example.org/review")
+        config = load_config(self.config_path)
+        app = create_app(self.config_path)
+        request = self.make_request(app)
+        job = {"id": "job1", "status": "completed", "public_token": "public-token", "selected_count": 2}
+
+        grapetree_url = build_grapetree_url(config, request, job)
+
+        self.assertIn(
+            "tree=https%3A%2F%2Fvirtitta.example.org%2Freview%2Fclusters%2Fpublic%2Fpublic-token%2Fgrapetree.json",
+            grapetree_url,
+        )
 
     def test_cluster_detail_renders_queued_job_status_script(self) -> None:
         self.enable_cluster()

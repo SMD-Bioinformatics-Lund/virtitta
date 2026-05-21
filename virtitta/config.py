@@ -119,6 +119,7 @@ class ClusterSettings:
     enabled: bool = False
     output_root: Path | None = None
     grapetree_url: str = ""
+    public_base_url: str = ""
     max_concurrent_jobs: int = 1
     timeout_seconds: int = 3600
     input_output_key: str = "export_iupac_fasta"
@@ -327,6 +328,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
                 else Path(cluster_raw.get("output_root", "data/clusters"))
             ),
             grapetree_url=str(cluster_raw.get("grapetree_url", "")),
+            public_base_url=str(cluster_raw.get("public_base_url", "")).rstrip("/"),
             max_concurrent_jobs=max(1, int(cluster_raw.get("max_concurrent_jobs", 1))),
             timeout_seconds=max(1, int(cluster_raw.get("timeout_seconds", 3600))),
             input_output_key=str(cluster_raw.get("input_output_key", "export_iupac_fasta")),
