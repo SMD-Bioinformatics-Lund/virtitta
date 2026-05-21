@@ -1704,11 +1704,15 @@ class VirtittaSmokeTests(unittest.TestCase):
         public_route = next(
             route for route in app.routes if getattr(route, "path", None) == "/clusters/public/{public_token}/{artifact_key}"
         )
+        artifact_route = next(
+            route for route in app.routes if getattr(route, "path", None) == "/clusters/{job_id}/artifacts/{artifact_key}"
+        )
         artifact_dir = config.cluster.output_root / "job1"
         artifact_dir.mkdir(parents=True)
         (artifact_dir / "iqtree.treefile").write_text("(LID001:0.1);\n", encoding="utf-8")
         (artifact_dir / "metadata.tsv").write_text("ID\tlid\nLID001\tLID001\n", encoding="utf-8")
         (artifact_dir / "grapetree.json").write_text('{"nwk":"(LID001:0.1);","metadata":{}}\n', encoding="utf-8")
+        artifact_response = artifact_route.endpoint(request, "job1", "treefile")
         public_metadata_response = public_route.endpoint("public-token", "metadata.txt")
         public_grapetree_response = public_route.endpoint("public-token", "grapetree.json")
 
@@ -1717,6 +1721,8 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("/clusters/{job_id}/artifacts/{artifact_key}", route_paths)
         self.assertIn("/clusters/public/{public_token}/{artifact_key}", route_paths)
         self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(artifact_response.media_type, "text/plain; charset=utf-8")
+        self.assertIn("inline", artifact_response.headers["content-disposition"])
         self.assertEqual(public_metadata_response.media_type, "text/plain; charset=utf-8")
         self.assertEqual(public_grapetree_response.media_type, "text/plain; charset=utf-8")
         self.assertIn("Cluster job1", detail_response.body.decode("utf-8"))

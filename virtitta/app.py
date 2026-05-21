@@ -1519,7 +1519,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             file_path = artifact_path(config, job, artifact_key)
         except ClusterError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return FileResponse(file_path, filename=file_path.name)
+        return FileResponse(
+            file_path,
+            filename=file_path.name,
+            media_type="text/plain; charset=utf-8",
+            content_disposition_type="inline",
+        )
 
     @app.get("/clusters/public/{public_token}/{artifact_key}", name="cluster_public_artifact")
     def cluster_public_artifact(public_token: str, artifact_key: str):

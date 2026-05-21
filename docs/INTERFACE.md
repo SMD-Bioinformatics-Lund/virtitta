@@ -49,8 +49,8 @@ are required.
 
 The cluster detail page shows job status, warnings, selected sample IDs, and generated artifacts. The metadata file
 contains `ID` plus the configured main-table columns and comment count. Completed jobs expose downloads for the raw
-FASTA, prepared FASTA, alignment, Newick tree, metadata, command snapshot, and log. The Newick tree and metadata can
-also be copied to the clipboard.
+FASTA, prepared FASTA, alignment, Newick tree, metadata, command snapshot, and log. Artifact links open inline in the
+browser, and the Newick tree and metadata can also be copied to the clipboard.
 
 If a GrapeTree URL is configured, completed jobs show `Open GrapeTree`. The link passes a tokenized GrapeTree JSON
 payload containing the generated Newick tree and metadata table to the configured standalone GrapeTree instance.
