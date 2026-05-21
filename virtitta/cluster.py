@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-import shutil
+import re
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
@@ -114,6 +114,67 @@ def _read_single_fasta_record(path: Path) -> tuple[str, str]:
     if not header or not seq_parts:
         raise ClusterError(f"Missing FASTA content in {path}")
     return header, "".join(seq_parts)
+
+
+def _iter_fasta_records(path: Path):
+    header = ""
+    seq_parts: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        if line.startswith(">"):
+            if header:
+                yield header, "".join(seq_parts)
+            header = line[1:].strip()
+            seq_parts = []
+        else:
+            seq_parts.append(line.strip())
+    if header:
+        yield header, "".join(seq_parts)
+
+
+def _trim_poly_t_tail(
+    sequence: str,
+    *,
+    min_length: int,
+    seed_length: int,
+    seed_min_t: int,
+    max_trailing_bases: int,
+) -> str:
+    if len(sequence) < min_length:
+        return sequence
+
+    sequence_upper = sequence.upper()
+    for match in re.finditer(f"T{{{min_length},}}", sequence_upper):
+        if len(sequence) - match.end() <= max_trailing_bases:
+            return sequence[: match.start()]
+
+    seed_length = max(seed_length, min_length)
+    seed_min_t = min(seed_min_t, seed_length)
+    search_start = max(0, len(sequence) - max_trailing_bases - seed_length)
+    for index in range(search_start, len(sequence) - seed_length + 1):
+        trailing_bases = len(sequence) - (index + seed_length)
+        if trailing_bases > max_trailing_bases:
+            continue
+        if sequence_upper[index] == "T" and sequence_upper[index : index + seed_length].count("T") >= seed_min_t:
+            return sequence[:index]
+    return sequence
+
+
+def _write_prepared_fasta(config: Config, input_fasta: Path, prepared_fasta: Path) -> None:
+    with prepared_fasta.open("w", encoding="utf-8") as handle:
+        for header, sequence in _iter_fasta_records(input_fasta):
+            if config.cluster.five_prime_trim:
+                sequence = sequence[config.cluster.five_prime_trim :]
+            if config.cluster.poly_t:
+                sequence = _trim_poly_t_tail(
+                    sequence,
+                    min_length=config.cluster.poly_t_min_length,
+                    seed_length=config.cluster.poly_t_seed_length,
+                    seed_min_t=config.cluster.poly_t_seed_min_t,
+                    max_trailing_bases=config.cluster.poly_t_max_trailing_bases,
+                )
+            handle.write(f">{header}\n{sequence}\n")
 
 
 def normalized_tree_id(header: str, suffix_to_strip: str) -> str:
@@ -333,22 +394,16 @@ def run_cluster_job(config: Config, job_id: str) -> None:
     try:
         with log_path.open("w", encoding="utf-8") as log_handle:
             input_fasta = config.cluster.output_root / artifacts[ARTIFACT_INPUT_FASTA]
-            if config.cluster.poly_a or config.cluster.five_prime_trim:
-                cutadapt_argv = [config.cluster.cutadapt_command]
-                if config.cluster.poly_a:
-                    cutadapt_argv.append("--poly-a")
-                if config.cluster.five_prime_trim:
-                    cutadapt_argv.extend(["-u", str(config.cluster.five_prime_trim)])
-                cutadapt_argv.extend(["-o", str(prepared_fasta), str(input_fasta)])
-                _run_command(
-                    cutadapt_argv,
-                    cwd=output_dir,
-                    timeout_seconds=config.cluster.timeout_seconds,
-                    stdout_path=None,
-                    log_handle=log_handle,
-                )
-            else:
-                shutil.copyfile(input_fasta, prepared_fasta)
+            log_handle.write(
+                "$ virtitta prepare-fasta"
+                f" --five-prime-trim {config.cluster.five_prime_trim}"
+                f" --poly-t-min-length {config.cluster.poly_t_min_length}"
+                f" --poly-t-seed-length {config.cluster.poly_t_seed_length}"
+                f" --poly-t-seed-min-t {config.cluster.poly_t_seed_min_t}"
+                f" --poly-t-max-trailing-bases {config.cluster.poly_t_max_trailing_bases}"
+                f" {input_fasta} {prepared_fasta}\n"
+            )
+            _write_prepared_fasta(config, input_fasta, prepared_fasta)
 
             mafft_argv = [config.cluster.mafft_command, *config.cluster.mafft_args, str(prepared_fasta)]
             _run_command(
@@ -363,6 +418,8 @@ def run_cluster_job(config: Config, job_id: str) -> None:
                 config.cluster.iqtree_command,
                 "-s",
                 str(alignment),
+                "-T",
+                str(config.cluster.iqtree_threads),
                 "-pre",
                 str(output_dir / "iqtree"),
                 *config.cluster.iqtree_args,

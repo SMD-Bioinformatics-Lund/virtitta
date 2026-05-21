@@ -24,11 +24,15 @@ timeout_seconds = 3600
 input_output_key = "export_iupac_fasta"
 header_suffix_to_strip = "-0.15-iupac"
 five_prime_trim = 50
-poly_a = true
-cutadapt_command = "cutadapt"
+poly_t = true
+poly_t_min_length = 10
+poly_t_seed_length = 12
+poly_t_seed_min_t = 10
+poly_t_max_trailing_bases = 100
 mafft_command = "mafft"
 iqtree_command = "iqtree3"
 mafft_args = ["--auto"]
+iqtree_threads = 4
 iqtree_args = []
 
 [features]

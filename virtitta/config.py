@@ -125,11 +125,15 @@ class ClusterSettings:
     input_output_key: str = "export_iupac_fasta"
     header_suffix_to_strip: str = "-0.15-iupac"
     five_prime_trim: int = 50
-    poly_a: bool = True
-    cutadapt_command: str = "cutadapt"
+    poly_t: bool = True
+    poly_t_min_length: int = 10
+    poly_t_seed_length: int = 12
+    poly_t_seed_min_t: int = 10
+    poly_t_max_trailing_bases: int = 100
     mafft_command: str = "mafft"
     iqtree_command: str = "iqtree3"
     mafft_args: list[str] = field(default_factory=lambda: ["--auto"])
+    iqtree_threads: int = 4
     iqtree_args: list[str] = field(default_factory=list)
 
 
@@ -334,11 +338,15 @@ def load_config(config_path: str | Path | None = None) -> Config:
             input_output_key=str(cluster_raw.get("input_output_key", "export_iupac_fasta")),
             header_suffix_to_strip=str(cluster_raw.get("header_suffix_to_strip", "-0.15-iupac")),
             five_prime_trim=max(0, int(cluster_raw.get("five_prime_trim", 50))),
-            poly_a=bool(cluster_raw.get("poly_a", True)),
-            cutadapt_command=str(cluster_raw.get("cutadapt_command", "cutadapt")),
+            poly_t=bool(cluster_raw.get("poly_t", cluster_raw.get("poly_a", True))),
+            poly_t_min_length=max(1, int(cluster_raw.get("poly_t_min_length", 10))),
+            poly_t_seed_length=max(1, int(cluster_raw.get("poly_t_seed_length", 12))),
+            poly_t_seed_min_t=max(1, int(cluster_raw.get("poly_t_seed_min_t", 10))),
+            poly_t_max_trailing_bases=max(0, int(cluster_raw.get("poly_t_max_trailing_bases", 100))),
             mafft_command=str(cluster_raw.get("mafft_command", "mafft")),
             iqtree_command=str(cluster_raw.get("iqtree_command", "iqtree3")),
             mafft_args=cluster_mafft_args,
+            iqtree_threads=max(1, int(cluster_raw.get("iqtree_threads", 4))),
             iqtree_args=_normalize_string_list(cluster_raw.get("iqtree_args", [])),
         ),
         features=FeatureSettings(

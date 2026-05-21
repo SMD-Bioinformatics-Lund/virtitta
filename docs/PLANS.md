@@ -72,7 +72,7 @@ Next steps:
 ### Isolate Clustering V1
 
 Implemented selected-sample clustering behind `[cluster].enabled`. The first version prepares imported IUPAC FASTA
-records, trims with cutadapt, aligns with MAFFT, builds a tree with IQ-TREE 3, stores artifacts under a configured
+records, prepares FASTA internally, aligns with MAFFT, builds a tree with IQ-TREE 3, stores artifacts under a configured
 output root, and exposes downloads plus GrapeTree handoff links.
 
 ### webIGV Fallback

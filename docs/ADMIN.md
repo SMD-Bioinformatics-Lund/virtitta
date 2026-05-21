@@ -70,8 +70,8 @@ integrity outside the browser.
 
 ## Cluster Configuration
 
-Selected-sample clustering is disabled by default. Enable it only when the Virtitta server can execute `cutadapt`,
-`mafft`, and `iqtree3` from the configured commands:
+Selected-sample clustering is disabled by default. Enable it only when the Virtitta server can execute `mafft` and
+`iqtree3` from the configured commands:
 
 ```toml
 [cluster]
@@ -84,23 +84,30 @@ timeout_seconds = 3600
 input_output_key = "export_iupac_fasta"
 header_suffix_to_strip = "-0.15-iupac"
 five_prime_trim = 50
-poly_a = true
-cutadapt_command = "cutadapt"
+poly_t = true
+poly_t_min_length = 10
+poly_t_seed_length = 12
+poly_t_seed_min_t = 10
+poly_t_max_trailing_bases = 100
 mafft_command = "mafft"
 iqtree_command = "iqtree3"
 mafft_args = ["--auto"]
+iqtree_threads = 4
 iqtree_args = []
 ```
 
 For the local conda workflow, install the command-line tools into the same environment that runs Virtitta:
 
 ```bash
-micromamba install -c conda-forge -c bioconda cutadapt mafft iqtree
+micromamba install -c conda-forge -c bioconda mafft iqtree
 ```
 
 V1 uses the imported `export_iupac_fasta` output for each selected sample, removes the configured FASTA header suffix,
-runs `cutadapt --poly-a -u 50`, aligns with MAFFT, then runs IQ-TREE 3. Cluster artifacts are written under
-`cluster.output_root`; queued or running jobs are marked failed on server restart.
+trims the configured number of 5' bases, trims a poly-T tail only when at most `poly_t_max_trailing_bases` follow the
+T-rich seed. Exact T runs of at least `poly_t_min_length` are trimmed, and fuzzy tails are trimmed when a
+`poly_t_seed_length` window contains at least `poly_t_seed_min_t` T bases. The prepared FASTA is aligned with MAFFT, then
+IQ-TREE 3 runs with `-T` set from `cluster.iqtree_threads`. Cluster artifacts are written under `cluster.output_root`;
+queued or running jobs are marked failed on server restart.
 
 The GrapeTree handoff uses a `tree=` URL parameter with a tokenized public link to `grapetree.json`. That JSON embeds
 the completed Newick tree and metadata table, avoiding the stricter separate metadata URL loader in some GrapeTree

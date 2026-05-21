@@ -180,10 +180,11 @@ class VirtittaSmokeTests(unittest.TestCase):
     def enable_cluster(
         self,
         *,
-        cutadapt_command: str = "cutadapt",
         mafft_command: str = "mafft",
         iqtree_command: str = "iqtree3",
         public_base_url: str = "",
+        iqtree_threads: int = 4,
+        five_prime_trim: int = 50,
     ) -> None:
         public_base_url_line = f'public_base_url = "{public_base_url}"\n' if public_base_url else ""
         with self.config_path.open("a", encoding="utf-8") as handle:
@@ -198,16 +199,26 @@ class VirtittaSmokeTests(unittest.TestCase):
                 "timeout_seconds = 60\n"
                 'input_output_key = "export_iupac_fasta"\n'
                 'header_suffix_to_strip = "-0.15-iupac"\n'
-                "five_prime_trim = 50\n"
-                "poly_a = true\n"
-                f'cutadapt_command = "{cutadapt_command}"\n'
+                f"five_prime_trim = {five_prime_trim}\n"
+                "poly_t = true\n"
+                "poly_t_min_length = 10\n"
+                "poly_t_seed_length = 12\n"
+                "poly_t_seed_min_t = 10\n"
+                "poly_t_max_trailing_bases = 100\n"
                 f'mafft_command = "{mafft_command}"\n'
                 f'iqtree_command = "{iqtree_command}"\n'
                 'mafft_args = ["--auto"]\n'
+                f"iqtree_threads = {iqtree_threads}\n"
                 "iqtree_args = []\n"
             )
 
-    def add_second_sample_summary(self, *, subtype: str = "1a", tree_id: str = "LID002-0.15-iupac") -> None:
+    def add_second_sample_summary(
+        self,
+        *,
+        subtype: str = "1a",
+        tree_id: str = "LID002-0.15-iupac",
+        sequence: str = "ACGTAAAA",
+    ) -> None:
         fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))[0]
         sample = json.loads(json.dumps(fixture))
         sample["sample_id"] = "SAMPLE002"
@@ -219,23 +230,15 @@ class VirtittaSmokeTests(unittest.TestCase):
         sample2_lid_dir = self.run_dir / "SAMPLE002" / "results" / "lid"
         sample2_lid_dir.mkdir(parents=True, exist_ok=True)
         (sample2_lid_dir / "LID002-0.15-iupac.fasta").write_text(
-            f">{tree_id}\nACGTAAAA\n",
+            f">{tree_id}\n{sequence}\n",
             encoding="utf-8",
         )
 
-    def write_fake_cluster_tools(self) -> tuple[Path, Path, Path]:
+    def write_fake_cluster_tools(self) -> tuple[Path, Path]:
         bin_dir = self.tmp_path / "bin"
         bin_dir.mkdir()
-        cutadapt = bin_dir / "cutadapt"
         mafft = bin_dir / "mafft"
         iqtree = bin_dir / "iqtree3"
-        cutadapt.write_text(
-            "#!/usr/bin/env python3\n"
-            "import shutil, sys\n"
-            "out = sys.argv[sys.argv.index('-o') + 1]\n"
-            "shutil.copyfile(sys.argv[-1], out)\n",
-            encoding="utf-8",
-        )
         mafft.write_text(
             "#!/usr/bin/env python3\n"
             "import pathlib, sys\n"
@@ -249,9 +252,9 @@ class VirtittaSmokeTests(unittest.TestCase):
             "prefix.with_suffix('.treefile').write_text('(LID001:0.1,LID002:0.1);\\n')\n",
             encoding="utf-8",
         )
-        for tool in (cutadapt, mafft, iqtree):
+        for tool in (mafft, iqtree):
             tool.chmod(0o755)
-        return cutadapt, mafft, iqtree
+        return mafft, iqtree
 
     def create_local_user(self, username: str, role: str, password: str = "secret") -> None:
         config = load_config(self.config_path)
@@ -1565,6 +1568,12 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(config.cluster.input_output_key, "export_iupac_fasta")
         self.assertEqual(config.cluster.iqtree_command, "iqtree3")
         self.assertEqual(config.cluster.mafft_args, ["--auto"])
+        self.assertEqual(config.cluster.iqtree_threads, 4)
+        self.assertTrue(config.cluster.poly_t)
+        self.assertEqual(config.cluster.poly_t_min_length, 10)
+        self.assertEqual(config.cluster.poly_t_seed_length, 12)
+        self.assertEqual(config.cluster.poly_t_seed_min_t, 10)
+        self.assertEqual(config.cluster.poly_t_max_trailing_bases, 100)
 
     def test_prepare_cluster_files_strips_header_suffix_and_writes_metadata(self) -> None:
         self.enable_cluster()
@@ -1609,13 +1618,13 @@ class VirtittaSmokeTests(unittest.TestCase):
             conn.close()
 
     def test_run_cluster_job_uses_configured_tools_and_completes(self) -> None:
-        cutadapt, mafft, iqtree = self.write_fake_cluster_tools()
+        mafft, iqtree = self.write_fake_cluster_tools()
         self.enable_cluster(
-            cutadapt_command=cutadapt.as_posix(),
             mafft_command=mafft.as_posix(),
             iqtree_command=iqtree.as_posix(),
+            five_prime_trim=0,
         )
-        self.add_second_sample_summary(subtype="3a")
+        self.add_second_sample_summary(subtype="3a", sequence="ACGTTTTTCTTTTTTACGT")
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
         conn = connect(config.database.path)
@@ -1661,12 +1670,17 @@ class VirtittaSmokeTests(unittest.TestCase):
             (config.cluster.output_root / "job1" / "iqtree.treefile").read_text(encoding="utf-8"),
             "(LID001:0.1,LID002:0.1);\n",
         )
+        self.assertIn(">LID002\nACG\n", (config.cluster.output_root / "job1" / "aligned.fasta").read_text(encoding="utf-8"))
         grapetree = json.loads((config.cluster.output_root / "job1" / "grapetree.json").read_text(encoding="utf-8"))
         self.assertEqual(grapetree["nwk"], "(LID001:0.1,LID002:0.1);")
         self.assertEqual(grapetree["layout_algorithm"], "greedy")
         self.assertEqual(sorted(grapetree["metadata"]), ["LID001", "LID002"])
         self.assertIn("sample_category", grapetree["metadata_options"])
-        self.assertIn("$", (config.cluster.output_root / "job1" / "cluster.log").read_text(encoding="utf-8"))
+        log_text = (config.cluster.output_root / "job1" / "cluster.log").read_text(encoding="utf-8")
+        self.assertIn("--poly-t-min-length 10", log_text)
+        self.assertIn("--poly-t-seed-length 12", log_text)
+        self.assertIn("--poly-t-seed-min-t 10", log_text)
+        self.assertIn("-T 4", log_text)
 
     def test_cluster_routes_are_registered_and_grapetree_url_uses_public_artifacts(self) -> None:
         self.enable_cluster()
