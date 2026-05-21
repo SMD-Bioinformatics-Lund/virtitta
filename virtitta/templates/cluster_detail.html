@@ -68,6 +68,21 @@
   </div>
 </section>
 
+<section id="cluster-clipboard-modal" class="clipboard-modal" hidden>
+  <div class="clipboard-modal-panel">
+    <div class="split-header">
+      <strong>Cluster artifact</strong>
+      <button type="button" class="secondary" data-cluster-clipboard-close>Close</button>
+    </div>
+    <div class="muted">Direct clipboard access was blocked by the browser. The content is selected below for manual copy.</div>
+    <textarea id="cluster-clipboard-text" rows="14" spellcheck="false" readonly></textarea>
+    <div class="button-row">
+      <button type="button" data-cluster-clipboard-copy>Copy</button>
+      <button type="button" class="secondary" data-cluster-clipboard-close>Close</button>
+    </div>
+  </div>
+</section>
+
 {% if job.status in ['queued', 'running'] %}
 <script>
 const statusLabel = document.querySelector('[data-cluster-status]');
@@ -92,6 +107,45 @@ window.setTimeout(refreshClusterStatus, 3000);
 {% endif %}
 
 <script>
+const clusterClipboardModal = document.getElementById('cluster-clipboard-modal');
+const clusterClipboardText = document.getElementById('cluster-clipboard-text');
+
+async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '-1000px';
+  textarea.style.left = '-1000px';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  return copied;
+}
+
+function showClusterClipboardModal(text) {
+  clusterClipboardText.value = text;
+  clusterClipboardModal.hidden = false;
+  clusterClipboardText.focus();
+  clusterClipboardText.select();
+  clusterClipboardText.setSelectionRange(0, clusterClipboardText.value.length);
+}
+
+function hideClusterClipboardModal() {
+  clusterClipboardModal.hidden = true;
+}
+
 for (const button of document.querySelectorAll('[data-copy-artifact]')) {
   button.addEventListener('click', async () => {
     try {
@@ -100,12 +154,33 @@ for (const button of document.querySelectorAll('[data-copy-artifact]')) {
         window.showAppToast('Could not read cluster artifact.', true);
         return;
       }
-      await navigator.clipboard.writeText(await response.text());
-      window.showAppToast('Copied cluster artifact.');
+      const text = await response.text();
+      if (await copyTextToClipboard(text)) {
+        window.showAppToast('Copied cluster artifact.');
+        return;
+      }
+      showClusterClipboardModal(text);
+      window.showAppToast('Clipboard write was blocked. Manual copy dialog opened.', true);
     } catch {
       window.showAppToast('Could not read cluster artifact.', true);
     }
   });
 }
+
+for (const button of document.querySelectorAll('[data-cluster-clipboard-close]')) {
+  button.addEventListener('click', hideClusterClipboardModal);
+}
+
+document.querySelector('[data-cluster-clipboard-copy]').addEventListener('click', async () => {
+  if (await copyTextToClipboard(clusterClipboardText.value)) {
+    window.showAppToast('Copied cluster artifact.');
+    hideClusterClipboardModal();
+    return;
+  }
+  clusterClipboardText.focus();
+  clusterClipboardText.select();
+  clusterClipboardText.setSelectionRange(0, clusterClipboardText.value.length);
+  window.showAppToast('Automatic copy is still blocked. Use Ctrl+C in the selected text box.', true);
+});
 </script>
 {% endblock %}
