@@ -53,13 +53,34 @@ def _sequencing_date_from_run_name(run_name: object, fallback_date: str | None) 
 def _maybe_float(value: object) -> float | None:
     if value in (None, ""):
         return None
-    return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _maybe_int(value: object) -> int | None:
     if value in (None, ""):
         return None
-    return int(float(value))
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_present(mapping: dict, keys: tuple[str, ...]) -> object:
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _default_clarity_sample_info_path(run_dir: Path) -> Path | None:
+    sample_info_path = run_dir / "clarity_sample_info.json"
+    if sample_info_path.is_file():
+        return sample_info_path
+    return None
 
 
 def _load_clarity_sample_info(sample_info_path: Path | None) -> dict[str, dict[str, object]]:
@@ -154,9 +175,29 @@ def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpa
         "variant_af_count_02": af_counts.get("0.2"),
         "variant_af_count_03": af_counts.get("0.3"),
         "variant_af_count_04": af_counts.get("0.4"),
-        "sample_metadata_ct": sample_metadata.get("ct"),
-        "sample_metadata_library_concentration_ng_ul": sample_metadata.get("library_concentration_ng_ul"),
-        "sample_metadata_library_fragment_length_bp": sample_metadata.get("library_fragment_length_bp"),
+        "sample_metadata_ct": _maybe_float(_first_present(sample_metadata, ("ct", "CT"))),
+        "sample_metadata_library_concentration_ng_ul": _maybe_float(
+            _first_present(
+                sample_metadata,
+                (
+                    "library_concentration_ng_ul",
+                    "Library concentration (ng/ul)",
+                    "library_concentration",
+                    "libconc",
+                ),
+            )
+        ),
+        "sample_metadata_library_fragment_length_bp": _maybe_int(
+            _first_present(
+                sample_metadata,
+                (
+                    "library_fragment_length_bp",
+                    "Library fragment length (bp)",
+                    "library_fragment_length",
+                    "libfrag",
+                ),
+            )
+        ),
         "raw_json": json.dumps(sample, sort_keys=True),
         "imported_at": imported_at,
     }
@@ -223,7 +264,9 @@ def import_run(config: Config, run_dir: Path, clarity_sample_info_path: Path | N
         raise FileNotFoundError(f"Missing per-sample QC summary files under: {run_dir}")
 
     root, run_relpath = _find_matching_root(run_dir, config.results_roots)
-    sample_info_by_id = _load_clarity_sample_info(clarity_sample_info_path)
+    sample_info_by_id = _load_clarity_sample_info(
+        clarity_sample_info_path or _default_clarity_sample_info_path(run_dir)
+    )
     records = [
         (_merge_clarity_sample_metadata(_load_sample_summary(path), sample_info_by_id), path)
         for path in qc_summary_paths

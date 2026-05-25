@@ -612,6 +612,93 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(raw["sample_metadata"]["library_concentration_ng_ul"], 5.6)
         self.assertEqual(raw["sample_metadata"]["library_fragment_length_bp"], 387)
 
+    def test_import_run_ignores_non_numeric_clarity_metadata_values(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["sample_metadata"] = {}
+        self.write_run_summaries([fixture[0]])
+        clarity_path = self.write_clarity_sample_info(
+            {
+                "sample_1": {
+                    "clarity_sample_id": "SAMPLE001",
+                    "CT": "Undetermined",
+                    "Library concentration (ng/ul)": 5.6,
+                    "Library fragment length (bp)": "Undetermined",
+                }
+            }
+        )
+
+        config = load_config(self.config_path)
+        imported = import_run(config, self.run_dir, clarity_path)
+        self.assertEqual(imported, 1)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        self.assertIsNone(sample["sample_metadata_ct"])
+        self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 5.6)
+        self.assertIsNone(sample["sample_metadata_library_fragment_length_bp"])
+
+    def test_import_run_uses_run_local_clarity_sample_info_when_metadata_is_missing(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["sample_metadata"] = {}
+        self.write_run_summaries([fixture[0]])
+        (self.run_dir / "clarity_sample_info.json").write_text(
+            json.dumps(
+                {
+                    "sample_1": {
+                        "clarity_sample_id": "SAMPLE001",
+                        "CT": 24.8,
+                        "Library concentration (ng/ul)": 5.6,
+                        "Library fragment length (bp)": 387,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        config = load_config(self.config_path)
+        imported = import_run(config, self.run_dir)
+        self.assertEqual(imported, 1)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        self.assertEqual(sample["sample_metadata_ct"], 24.8)
+        self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 5.6)
+        self.assertEqual(sample["sample_metadata_library_fragment_length_bp"], 387)
+
+    def test_import_run_accepts_display_metadata_keys_from_qc_summary(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["sample_metadata"] = {
+            "CT": "24.8",
+            "Library concentration (ng/ul)": "5.6",
+            "Library fragment length (bp)": "387",
+        }
+        self.write_run_summaries([fixture[0]])
+
+        config = load_config(self.config_path)
+        imported = import_run(config, self.run_dir)
+        self.assertEqual(imported, 1)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        self.assertEqual(sample["sample_metadata_ct"], 24.8)
+        self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 5.6)
+        self.assertEqual(sample["sample_metadata_library_fragment_length_bp"], 387)
+
     def test_import_run_prefers_qc_summary_metadata_over_clarity_sample_info(self) -> None:
         clarity_path = self.write_clarity_sample_info(
             {

@@ -155,6 +155,9 @@ python -m virtitta.cli import-run \
   --clarity-sample-info /path/to/clarity_sample_info.json
 ```
 
+When `/path/to/results/<run_name>/clarity_sample_info.json` exists, `import-run` uses it automatically to fill missing
+CT, library concentration, and library fragment length values.
+
 Import all runs under configured result roots:
 
 ```bash
