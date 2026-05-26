@@ -279,10 +279,25 @@ a:hover {
 .action-menu summary {
   list-style: none;
   cursor: pointer;
-  padding: 5px 7px;
-  border: 1px solid #978d7f;
-  background: #f4f0e7;
+  padding: 5px 20px 5px 7px;
+  border: 1px solid #5f8f84;
+  border-radius: 3px;
+  background: #e6f0ed;
   color: var(--ink);
+  position: relative;
+}
+
+.action-menu summary::after {
+  content: "";
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid #315e55;
+  transform: translateY(-35%);
 }
 
 .action-menu summary::-webkit-details-marker {

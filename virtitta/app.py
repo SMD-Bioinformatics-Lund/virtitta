@@ -1406,6 +1406,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         request: Request,
         sample_run_id: list[str] = Form(default=[]),
         redirect_to: str = Form(default="/"),
+        allow_duplicate_ids: str = Form(default=""),
         csrf_token: str = Form(default=""),
     ):
         require_permission(request, PERMISSION_EXPORT_READ)
@@ -1429,7 +1430,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             try:
-                sample_records, warning_text = prepare_cluster_files(config, connection, sample_rows, job_id)
+                sample_records, warning_text = prepare_cluster_files(
+                    config,
+                    connection,
+                    sample_rows,
+                    job_id,
+                    allow_duplicate_ids=allow_duplicate_ids == "true",
+                )
                 write_command_snapshot(config, job_id)
             except ClusterError as exc:
                 return RedirectResponse(

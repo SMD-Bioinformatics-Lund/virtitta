@@ -313,7 +313,14 @@ def cluster_metadata_columns(config: Config) -> list[str]:
     return columns
 
 
-def prepare_cluster_files(config: Config, connection, sample_rows: list[dict], output_relpath: str) -> tuple[list[dict], str]:
+def prepare_cluster_files(
+    config: Config,
+    connection,
+    sample_rows: list[dict],
+    output_relpath: str,
+    *,
+    allow_duplicate_ids: bool = False,
+) -> tuple[list[dict], str]:
     if len(sample_rows) < 2:
         raise ClusterError("Select at least two samples for clustering")
 
@@ -323,21 +330,37 @@ def prepare_cluster_files(config: Config, connection, sample_rows: list[dict], o
     raw_fasta = config.cluster.output_root / artifacts[ARTIFACT_INPUT_FASTA]
     metadata_path = config.cluster.output_root / artifacts[ARTIFACT_METADATA]
 
-    sample_records: list[dict] = []
-    seen_tree_ids: set[str] = set()
+    fasta_records: list[tuple[dict, str, str, str]] = []
+    tree_id_counts: dict[str, int] = {}
     subtype_values = {str(row.get("typing_report_subtype") or "") for row in sample_rows}
     warnings = []
     if len(subtype_values) > 1:
         shown = ", ".join(sorted(value or "blank" for value in subtype_values))
         warnings.append(f"Selected samples contain multiple subtypes: {shown}.")
 
+    for sample_row in sample_rows:
+        fasta_path = _sample_output_file(config, connection, sample_row, config.cluster.input_output_key)
+        header, sequence = _read_single_fasta_record(fasta_path)
+        tree_id = normalized_tree_id(header, config.cluster.header_suffix_to_strip)
+        fasta_records.append((sample_row, tree_id, sequence, header))
+        tree_id_counts[tree_id] = tree_id_counts.get(tree_id, 0) + 1
+
+    duplicate_tree_ids = {tree_id for tree_id, count in tree_id_counts.items() if count > 1}
+    if duplicate_tree_ids and not allow_duplicate_ids:
+        first_duplicate = next(tree_id for _, tree_id, _, _ in fasta_records if tree_id in duplicate_tree_ids)
+        raise ClusterError(f"Duplicate FASTA tree ID after normalization: {first_duplicate}")
+    if duplicate_tree_ids:
+        shown = ", ".join(sorted(duplicate_tree_ids))
+        warnings.append(f"Duplicate FASTA tree IDs were renamed with run name suffixes: {shown}.")
+
+    sample_records: list[dict] = []
+    seen_tree_ids: set[str] = set()
     with raw_fasta.open("w", encoding="utf-8") as fasta_handle:
-        for index, sample_row in enumerate(sample_rows):
-            fasta_path = _sample_output_file(config, connection, sample_row, config.cluster.input_output_key)
-            header, sequence = _read_single_fasta_record(fasta_path)
-            tree_id = normalized_tree_id(header, config.cluster.header_suffix_to_strip)
+        for index, (sample_row, tree_id, sequence, _header) in enumerate(fasta_records):
+            if tree_id in duplicate_tree_ids:
+                tree_id = f"{tree_id}-{sample_row['run_name']}"
             if tree_id in seen_tree_ids:
-                raise ClusterError(f"Duplicate FASTA tree ID after normalization: {tree_id}")
+                raise ClusterError(f"Duplicate FASTA tree ID after run-name disambiguation: {tree_id}")
             seen_tree_ids.add(tree_id)
             fasta_handle.write(f">{tree_id}\n{sequence}\n")
             sample_records.append(

@@ -1187,6 +1187,50 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("applyTableViewFilter", rendered)
         self.assertIn("addHiddenInputsForFilteredSelection", rendered)
 
+    def test_index_route_renders_cluster_duplicate_option_when_enabled(self) -> None:
+        self.enable_cluster()
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
+
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": "/",
+                "raw_path": b"/",
+                "query_string": b"",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "app": app,
+                "router": app.router,
+            }
+        )
+
+        response = route.endpoint(
+            request,
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        )
+
+        rendered = response.body.decode("utf-8")
+        self.assertIn("<summary>Cluster...</summary>", rendered)
+        self.assertIn(">Cluster selected</button>", rendered)
+        self.assertIn('name="allow_duplicate_ids" value="true"', rendered)
+        self.assertIn(">Cluster selected (allow duplicates)</button>", rendered)
+
     def test_index_route_renders_server_messages_as_toasts(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
@@ -1703,6 +1747,53 @@ class VirtittaSmokeTests(unittest.TestCase):
                 prepare_cluster_files(config, conn, rows, "job1")
         finally:
             conn.close()
+
+    def test_prepare_cluster_files_can_suffix_duplicate_tree_ids_with_run_name(self) -> None:
+        self.enable_cluster()
+        second_run_dir = self.root / "fixture_run_2"
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))[0]
+        sample = json.loads(json.dumps(fixture))
+        sample["run_name"] = "fixture_run_2"
+        sample["sample_id"] = "SAMPLE002"
+        sample["sample_run_id"] = "SAMPLE002_fixture_run_2"
+        sample["lid"] = "LID001"
+        sample["outputs"]["export_iupac_fasta"] = "lid/LID001-0.15-iupac.fasta"
+        summary_path = second_run_dir / "SAMPLE002" / "results" / "SAMPLE002_qc_summary.json"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(json.dumps(sample), encoding="utf-8")
+        lid_dir = second_run_dir / "SAMPLE002" / "results" / "lid"
+        lid_dir.mkdir(parents=True, exist_ok=True)
+        (lid_dir / "LID001-0.15-iupac.fasta").write_text(">LID001-0.15-iupac\nACGTAAAA\n", encoding="utf-8")
+
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        import_run(config, second_run_dir)
+        conn = connect(config.database.path)
+        try:
+            rows = [
+                get_sample(conn, "SAMPLE001_fixture_run"),
+                get_sample(conn, "SAMPLE002_fixture_run_2"),
+            ]
+            sample_records, warning_text = prepare_cluster_files(
+                config,
+                conn,
+                rows,
+                "job1",
+                allow_duplicate_ids=True,
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(
+            [record["tree_id"] for record in sample_records],
+            ["LID001-fixture_run", "LID001-fixture_run_2"],
+        )
+        self.assertIn("renamed with run name suffixes: LID001", warning_text)
+        prepared_input = (config.cluster.output_root / "job1" / "input.raw.fasta").read_text(encoding="utf-8")
+        metadata = (config.cluster.output_root / "job1" / "metadata.tsv").read_text(encoding="utf-8")
+        self.assertIn(">LID001-fixture_run\nARYT\n", prepared_input)
+        self.assertIn(">LID001-fixture_run_2\nACGTAAAA\n", prepared_input)
+        self.assertIn("LID001-fixture_run_2\tLID001\tSAMPLE002", metadata)
 
     def test_run_cluster_job_uses_configured_tools_and_completes(self) -> None:
         mafft, iqtree = self.write_fake_cluster_tools()

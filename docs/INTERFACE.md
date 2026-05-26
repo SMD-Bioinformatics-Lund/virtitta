@@ -44,8 +44,9 @@ Failing a sample requires a comment.
 
 ## Clustering
 
-When clustering is enabled, `Cluster selected` starts a background job from the selected samples. At least two samples
-are required.
+When clustering is enabled, `Cluster` opens actions for the selected samples. `Cluster selected` starts a background job
+and keeps duplicate FASTA tree IDs as a blocking warning. `Cluster selected (allow duplicates)` allows duplicated
+normalized FASTA IDs by renaming those duplicated IDs to `<ID>-<run_name>`. At least two samples are required.
 
 The cluster detail page shows job status, warnings, selected sample IDs, and generated artifacts. The metadata file
 contains `ID` plus the configured main-table columns and comment count. Completed jobs expose downloads for the raw

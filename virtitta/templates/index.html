@@ -61,7 +61,7 @@
     </select>
     <label class="checkbox-inline">
       <input type="checkbox" name="desc" value="true" {% if desc %}checked{% endif %}>
-      Desc
+      Descending
     </label>
     <button type="submit">Apply</button>
     <a class="button-link secondary" href="{{ request.url_for('index') }}" data-selection-reset>Reset</a>
@@ -140,7 +140,13 @@
       {% endif %}
       {% if permissions.export_read %}
       {% if cluster_enabled %}
-      <button type="submit" formaction="{{ request.url_for('create_cluster') }}" formmethod="post" class="secondary">Cluster selected</button>
+      <details class="action-menu">
+        <summary>Cluster...</summary>
+        <div class="action-menu-list">
+          <button type="submit" formaction="{{ request.url_for('create_cluster') }}" formmethod="post" class="secondary">Cluster selected</button>
+          <button type="submit" name="allow_duplicate_ids" value="true" formaction="{{ request.url_for('create_cluster') }}" formmethod="post" class="secondary">Cluster selected (allow duplicates)</button>
+        </div>
+      </details>
       {% endif %}
       <details class="action-menu">
         <summary>Export...</summary>
