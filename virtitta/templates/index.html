@@ -116,22 +116,35 @@
         <input type="checkbox" data-selected-only>
         Selected only
       </label>
-      {% if permissions.qc_update %}
-      <button type="submit" name="qc_status" value="pass">Mark pass</button>
-      <button type="submit" name="qc_status" value="fail">Mark fail</button>
-      <button type="submit" name="qc_status" value="unreviewed" class="secondary">Reset QC</button>
+      {% if permissions.qc_update or permissions.category_update or permissions.sample_delete %}
+      <details class="action-menu">
+        <summary>Manage...</summary>
+        <div class="action-menu-list">
+          {% if permissions.qc_update %}
+          <button type="submit" name="qc_status" value="pass" data-confirm-multiple="Apply &quot;Mark pass&quot; to {count} selected samples?">Mark pass</button>
+          <button type="submit" name="qc_status" value="fail" data-confirm-multiple="Apply &quot;Mark fail&quot; to {count} selected samples?">Mark fail</button>
+          <button type="submit" name="qc_status" value="unreviewed" class="secondary" data-confirm-multiple="Apply &quot;Reset QC&quot; to {count} selected samples?">Reset QC</button>
+          {% endif %}
+          {% if permissions.category_update %}
+          <button type="submit" name="sample_category" value="" formaction="{{ request.url_for('bulk_category_update') }}" formmethod="post" class="secondary" data-confirm-multiple="Clear category on {count} selected samples?">Clear category</button>
+          {% for category in config.annotations.sample_categories %}
+          <button type="submit" name="sample_category" value="{{ category }}" formaction="{{ request.url_for('bulk_category_update') }}" formmethod="post" class="secondary" data-confirm-multiple="Set category &quot;{{ category }}&quot; on {count} selected samples?">Set category: {{ category }}</button>
+          {% endfor %}
+          {% endif %}
+          {% if permissions.sample_delete %}
+          <button
+            type="submit"
+            formaction="{{ request.url_for('bulk_delete_samples') }}"
+            formmethod="post"
+            class="secondary"
+            data-confirm-always="Delete the selected samples from the Virtitta database? This does not delete result files on disk."
+          >Delete samples</button>
+          {% endif %}
+        </div>
+      </details>
       {% endif %}
       {% if permissions.export_lims %}
       <button type="submit" formaction="{{ request.url_for('bulk_lims_export') }}" formmethod="post" class="secondary">Export LIMS</button>
-      {% endif %}
-      {% if permissions.category_update %}
-      <select name="sample_category">
-        <option value="">Clear category</option>
-        {% for category in available_sample_categories %}
-        <option value="{{ category }}">{{ category }}</option>
-        {% endfor %}
-      </select>
-      <button type="submit" formaction="{{ request.url_for('bulk_category_update') }}" formmethod="post" class="secondary">Apply category</button>
       {% endif %}
       {% if permissions.group_update %}
       <input type="text" name="group_name" placeholder="Manual group">
@@ -157,15 +170,6 @@
           <button type="button" class="secondary" data-export-clipboard="{{ request.url_for('bulk_iupac_fasta_clipboard_export') }}">15% IUPAC FASTA to clipboard</button>
         </div>
       </details>
-      {% endif %}
-      {% if permissions.sample_delete %}
-      <button
-        type="submit"
-        formaction="{{ request.url_for('bulk_delete_samples') }}"
-        formmethod="post"
-        class="secondary"
-        onclick="return confirm('Delete the selected samples from the Virtitta database? This does not delete result files on disk.')"
-      >Delete samples</button>
       {% endif %}
       {% if permissions.qc_update %}
       {% if not config.auth.enabled %}
@@ -538,6 +542,19 @@ function addHiddenInputsForFilteredSelection(form) {
   }
 }
 
+function confirmBulkAction(submitter, selectedCount) {
+  if (!submitter) {
+    return true;
+  }
+  if (submitter.dataset.confirmAlways) {
+    return window.confirm(submitter.dataset.confirmAlways);
+  }
+  if (selectedCount > 1 && submitter.dataset.confirmMultiple) {
+    return window.confirm(submitter.dataset.confirmMultiple.replace('{count}', selectedCount));
+  }
+  return true;
+}
+
 function columnToggles() {
   return Array.from(document.querySelectorAll('.js-col-toggle'));
 }
@@ -728,8 +745,12 @@ for (const resetLink of document.querySelectorAll('[data-selection-reset]')) {
 }
 
 if (bulkForm) {
-  bulkForm.addEventListener('submit', () => {
+  bulkForm.addEventListener('submit', event => {
     syncSavedSelectionFromDom();
+    if (!confirmBulkAction(event.submitter, selectedSampleIds().length)) {
+      event.preventDefault();
+      return;
+    }
     addHiddenInputsForFilteredSelection(bulkForm);
   });
 }

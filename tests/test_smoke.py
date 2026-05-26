@@ -1356,7 +1356,16 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("filterForm.requestSubmit();", rendered)
         self.assertIn('data-export-value="Run"', rendered)
         self.assertIn('data-export-value="Comments"', rendered)
-        self.assertIn("Apply category", rendered)
+        self.assertIn("<summary>Manage...</summary>", rendered)
+        self.assertIn(">Mark pass</button>", rendered)
+        self.assertIn(">Clear category</button>", rendered)
+        self.assertIn(">Set category: production</button>", rendered)
+        self.assertIn(">Set category: validation</button>", rendered)
+        self.assertIn('name="sample_category" value="production"', rendered)
+        self.assertIn("data-confirm-multiple=", rendered)
+        self.assertIn("data-confirm-always=", rendered)
+        self.assertIn("confirmBulkAction(event.submitter, selectedSampleIds().length)", rendered)
+        self.assertNotIn("Apply category", rendered)
         self.assertIn("Add group", rendered)
 
     def test_index_route_uses_configured_table_column_order_for_hidden_columns(self) -> None:

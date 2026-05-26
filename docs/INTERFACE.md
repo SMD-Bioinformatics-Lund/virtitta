@@ -42,6 +42,11 @@ Common reviewer actions:
 
 Failing a sample requires a comment.
 
+QC state changes, category assignment, category clearing, and sample deletion are grouped under `Manage...`.
+QC and category actions ask for confirmation when more than one sample is selected. Deleting samples always asks for
+confirmation and only removes records from Virtitta, not result files on disk. Category actions use the configured
+sample category list directly.
+
 ## Clustering
 
 When clustering is enabled, `Cluster` opens actions for the selected samples. `Cluster selected` starts a background job
