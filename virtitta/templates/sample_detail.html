@@ -247,10 +247,16 @@
     {% if permissions.export_read %}
     <div class="link-grid">
       {% for link in detail_links %}
-      <a class="file-link" href="{{ request.url_for('sample_file', sample_run_id=sample['sample_run_id'], output_key=link['key']) }}">
+      <div class="file-link">
         <span>{{ link["label"] }}</span>
         <span class="muted file-name">{{ link["filename"] }}</span>
-      </a>
+        <span class="file-actions">
+          {% if link["can_view"] %}
+          <a class="mini-action" href="{{ request.url_for('sample_file_view', sample_run_id=sample['sample_run_id'], output_key=link['key']) }}">View</a>
+          {% endif %}
+          <a class="mini-action secondary" href="{{ request.url_for('sample_file', sample_run_id=sample['sample_run_id'], output_key=link['key']) }}">Download</a>
+        </span>
+      </div>
       {% else %}
       <div class="muted">No result files exposed for this sample.</div>
       {% endfor %}

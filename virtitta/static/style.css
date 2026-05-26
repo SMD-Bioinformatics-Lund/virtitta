@@ -747,6 +747,12 @@ button.secondary,
   word-break: break-all;
 }
 
+.file-actions {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
 .detail-wrap {
   white-space: normal;
   min-width: 320px;

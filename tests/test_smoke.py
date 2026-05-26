@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from virtitta.app import (
@@ -319,6 +320,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             "SAMPLE001.vadr.bed",
             "SAMPLE001_resistance.gff",
             "SAMPLE001.vadr.pass_mod.gff",
+            "SAMPLE001.fasta.blast",
         ]:
             (self.sample_dir / filename).write_text("placeholder", encoding="utf-8")
         (self.sample_dir / "lid").mkdir(parents=True)
@@ -2357,6 +2359,45 @@ class VirtittaSmokeTests(unittest.TestCase):
             Path(response.path).read_text(encoding="utf-8"),
             "cached image",
         )
+
+    def test_sample_file_view_serves_blast_inline(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/files/{output_key}/view")
+        response = route.endpoint(self.make_request(app), "SAMPLE001_fixture_run", "main_blast")
+
+        self.assertEqual(Path(response.path).read_text(encoding="utf-8"), "placeholder")
+        self.assertIn("inline", response.headers["content-disposition"])
+        self.assertIn("SAMPLE001.fasta.blast", response.headers["content-disposition"])
+
+    def test_sample_file_view_blocks_cram(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/files/{output_key}/view")
+        with self.assertRaises(HTTPException) as raised:
+            route.endpoint(self.make_request(app), "SAMPLE001_fixture_run", "main_cram")
+
+        self.assertEqual(raised.exception.status_code, 404)
+
+    def test_sample_detail_renders_blast_view_and_download_actions(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}")
+        response = route.endpoint(self.make_request(app, path="/samples/SAMPLE001_fixture_run"), "SAMPLE001_fixture_run")
+        rendered = response.body.decode("utf-8")
+
+        self.assertIn("Main BLAST", rendered)
+        self.assertIn("/samples/SAMPLE001_fixture_run/files/main_blast/view", rendered)
+        self.assertIn("/samples/SAMPLE001_fixture_run/files/main_blast", rendered)
+        self.assertIn("SAMPLE001.fasta.blast", rendered)
+        self.assertNotIn("/samples/SAMPLE001_fixture_run/files/main_cram/view", rendered)
+        self.assertNotIn("/samples/SAMPLE001_fixture_run/files/display_rug_kde_plot/view", rendered)
 
     def test_auth_enabled_redirects_anonymous_user_to_login(self) -> None:
         self.enable_auth()

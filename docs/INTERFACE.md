@@ -99,9 +99,13 @@ The detail page shows:
 - comments
 - rug/KDE image when available
 - resistance summary and mutation links
-- result file links
+- result file links, including the main BLAST output when imported
 - IGV track file links
 - raw imported QC JSON
+
+Result files expose browser `View` actions for text-oriented outputs such as FASTA, BLAST, TSV, BED, GFF, and LIMS text
+files, plus `Download` actions for saving the file. CRAM files and the rug plot are download-only in this section; the
+rug plot is already rendered directly on the detail page.
 
 ## IGV Viewing
 

@@ -84,6 +84,7 @@ DETAIL_FILE_LINKS = [
     ("Export FASTA", "export_fasta"),
     ("Export 0.15 IUPAC FASTA", "export_iupac_fasta"),
     ("Main FASTA", "main_fasta"),
+    ("Main BLAST", "main_blast"),
     ("Main CRAM", "main_cram"),
     ("0.15 IUPAC FASTA", "iupac_fasta"),
     ("0.15 IUPAC CRAM", "iupac_cram"),
@@ -95,6 +96,20 @@ DETAIL_FILE_LINKS = [
     ("Display Rug Plot", "display_rug_kde_plot"),
     ("LID 2limsrs", "lid_2limsrs"),
 ]
+
+VIEWABLE_DETAIL_OUTPUT_KEYS = {
+    "export_fasta",
+    "export_iupac_fasta",
+    "main_fasta",
+    "main_blast",
+    "iupac_fasta",
+    "coverage_tsv",
+    "resistance_tsv",
+    "resistance_gff",
+    "vadr_bed",
+    "selected_vadr_gff",
+    "lid_2limsrs",
+}
 
 IGV_TRACK_LINKS = [
     ("Genome FASTA", "main_fasta"),
@@ -507,7 +522,14 @@ def output_links(outputs: dict, link_specs: list[tuple[str, str]]) -> list[dict]
     for label, key in link_specs:
         relname = outputs.get(key)
         if relname:
-            links.append({"label": label, "key": key, "filename": relname})
+            links.append(
+                {
+                    "label": label,
+                    "key": key,
+                    "filename": relname,
+                    "can_view": key in VIEWABLE_DETAIL_OUTPUT_KEYS,
+                }
+            )
     return links
 
 
@@ -1757,6 +1779,33 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             return FileResponse(cached_path, filename=outputs.get(output_key) or cached_path.name)
         file_path, relname = resolve_output_file(config, sample_row, output_key)
         return FileResponse(file_path, filename=relname)
+
+    @app.get("/samples/{sample_run_id}/files/{output_key}/view")
+    def sample_file_view(request: Request, sample_run_id: str, output_key: str):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        if output_key not in VIEWABLE_DETAIL_OUTPUT_KEYS:
+            raise HTTPException(status_code=404, detail="Output is not available for browser viewing")
+
+        cached_path = None
+        connection = connect(config.database.path)
+        try:
+            sample_row = get_sample(connection, sample_run_id)
+            if sample_row is None:
+                raise HTTPException(status_code=404, detail="Sample not found")
+            if is_cacheable_output(config, output_key):
+                cached_path = get_cached_output_file(config, connection, sample_run_id, output_key)
+        finally:
+            connection.close()
+
+        outputs = effective_outputs(config, sample_row)
+        if cached_path is not None:
+            return FileResponse(
+                cached_path,
+                filename=outputs.get(output_key) or cached_path.name,
+                content_disposition_type="inline",
+            )
+        file_path, relname = resolve_output_file(config, sample_row, output_key)
+        return FileResponse(file_path, filename=relname, content_disposition_type="inline")
 
     @app.get("/samples/{sample_run_id}/webigv", response_class=HTMLResponse)
     def sample_webigv(request: Request, sample_run_id: str, locus: str = Query(default="")):
