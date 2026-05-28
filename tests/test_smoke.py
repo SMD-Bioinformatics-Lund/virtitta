@@ -1535,7 +1535,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn('data-export-value="Run"', rendered)
         self.assertIn('data-export-value="Cat"', rendered)
         self.assertIn('data-export-value="production"', rendered)
-        self.assertIn('title="production">Pro</span>', rendered)
+        self.assertIn('title="production">Prod</span>', rendered)
 
     def test_igv_url_contains_expected_files(self) -> None:
         config = load_config(self.config_path)
