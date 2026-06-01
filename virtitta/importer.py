@@ -6,6 +6,7 @@ from pathlib import Path
 
 from virtitta.artifact_cache import cache_sample_outputs
 from virtitta.config import Config, ResultsRoot
+from virtitta.outputs import required_sidecars, safe_relative_path
 from virtitta.repository import connect, init_db, sync_run_sample_count, upsert_run, upsert_sample, utc_now
 
 
@@ -206,12 +207,19 @@ def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpa
 def _sample_qc_summary_paths(run_dir: Path) -> list[Path]:
     paths: list[Path] = []
     for sample_dir in sorted(path for path in run_dir.iterdir() if path.is_dir()):
-        results_dir = sample_dir / "results"
-        if not results_dir.is_dir():
-            continue
-        qc_summary_path = results_dir / f"{sample_dir.name}_qc_summary.json"
-        if qc_summary_path.is_file():
-            paths.append(qc_summary_path)
+        flat_qc_summary_path = sample_dir / f"{sample_dir.name}_qc_summary.json"
+        nested_qc_summary_path = sample_dir / "results" / f"{sample_dir.name}_qc_summary.json"
+        flat_exists = flat_qc_summary_path.is_file()
+        nested_exists = nested_qc_summary_path.is_file()
+        if flat_exists and nested_exists:
+            raise ValueError(
+                "Ambiguous QC summary layout for"
+                f" {sample_dir.name}: found both {flat_qc_summary_path} and {nested_qc_summary_path}"
+            )
+        if flat_exists:
+            paths.append(flat_qc_summary_path)
+        elif nested_exists:
+            paths.append(nested_qc_summary_path)
     return paths
 
 
@@ -222,6 +230,25 @@ def _load_sample_summary(qc_summary_path: Path) -> dict:
     if isinstance(payload, list) and len(payload) == 1 and isinstance(payload[0], dict):
         return payload[0]
     raise ValueError(f"Expected a JSON object in {qc_summary_path}")
+
+
+def _validate_required_sidecars(sample: dict, sample_dir: Path) -> None:
+    outputs = sample.get("outputs", {})
+    if not isinstance(outputs, dict):
+        return
+    missing: list[str] = []
+    for output_key, relname in required_sidecars(outputs):
+        try:
+            path = safe_relative_path(sample_dir, str(relname))
+        except ValueError as exc:
+            raise ValueError(f"Unsafe sidecar path for {output_key}: {relname}") from exc
+        if not path.is_file():
+            missing.append(f"{output_key}: {path}")
+    if missing:
+        sample_id = sample.get("sample_id") or sample.get("sample_run_id") or sample_dir.name
+        raise FileNotFoundError(
+            f"Missing required index sidecar(s) for {sample_id}: " + "; ".join(missing)
+        )
 
 
 def _manual_failed_sample_summary(
@@ -297,6 +324,7 @@ def import_run(config: Config, run_dir: Path, clarity_sample_info_path: Path | N
         root_path = root.linux_path.resolve()
         for sample, qc_summary_path in records:
             sample_results_relpath = qc_summary_path.parent.resolve().relative_to(root_path)
+            _validate_required_sidecars(sample, qc_summary_path.parent)
             sample_record = _flatten_sample_record(
                 sample,
                 root_name=root.name,

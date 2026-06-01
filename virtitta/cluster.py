@@ -10,6 +10,7 @@ from pathlib import Path
 
 from virtitta.artifact_cache import get_cached_output_file
 from virtitta.config import Config
+from virtitta.outputs import effective_output_relname, safe_relative_path
 from virtitta.repository import (
     connect,
     get_cluster_job,
@@ -102,7 +103,7 @@ def _sample_output_file(config: Config, connection, sample_row: dict, output_key
         return cached_path
 
     raw = json.loads(sample_row["raw_json"])
-    relname = raw.get("outputs", {}).get(output_key)
+    relname = effective_output_relname(output_key, raw.get("outputs", {}))
     if not relname:
         raise ClusterError(f"Missing {output_key} output for {sample_row['sample_run_id']}")
 
@@ -111,7 +112,10 @@ def _sample_output_file(config: Config, connection, sample_row: dict, output_key
         raise ClusterError(f"Configured results root not found: {sample_row['source_root_name']}")
 
     sample_dir = root.linux_path / sample_row["sample_results_relpath"]
-    candidate = sample_dir / relname
+    try:
+        candidate = safe_relative_path(sample_dir, str(relname))
+    except ValueError as exc:
+        raise ClusterError(f"Unsafe file path for {sample_row['sample_run_id']}: {relname}") from exc
     if not candidate.exists():
         raise ClusterError(f"Missing file on disk for {sample_row['sample_run_id']}: {candidate}")
     return candidate
@@ -257,13 +261,10 @@ def _write_fasta_prep_log_summary(log_handle, config: Config, stats: FastaPrepSt
         )
 
 
-def normalized_tree_id(header: str, suffix_to_strip: str) -> str:
-    first_token = header.split()[0] if header.split() else header
-    if suffix_to_strip and first_token.endswith(suffix_to_strip):
-        first_token = first_token[: -len(suffix_to_strip)]
-    tree_id = first_token.strip()
+def sample_tree_id(sample_row: dict) -> str:
+    tree_id = str(sample_row.get("lid") or sample_row.get("sample_id") or sample_row.get("sample_run_id") or "").strip()
     if not tree_id:
-        raise ClusterError("FASTA header normalized to an empty tree ID")
+        raise ClusterError(f"Sample has no usable tree ID: {sample_row.get('sample_run_id')}")
     return tree_id
 
 
@@ -341,7 +342,7 @@ def prepare_cluster_files(
     for sample_row in sample_rows:
         fasta_path = _sample_output_file(config, connection, sample_row, config.cluster.input_output_key)
         header, sequence = _read_single_fasta_record(fasta_path)
-        tree_id = normalized_tree_id(header, config.cluster.header_suffix_to_strip)
+        tree_id = sample_tree_id(sample_row)
         fasta_records.append((sample_row, tree_id, sequence, header))
         tree_id_counts[tree_id] = tree_id_counts.get(tree_id, 0) + 1
 

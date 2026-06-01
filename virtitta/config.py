@@ -87,7 +87,7 @@ DEFAULT_HIGHLIGHT_RULES = {
 }
 
 QC_STATUS_OPTIONS = ["unreviewed", "pass", "fail"]
-DEFAULT_CACHE_OUTPUT_KEYS = ["export_fasta", "export_iupac_fasta", "display_rug_kde_plot"]
+DEFAULT_CACHE_OUTPUT_KEYS = ["main_fasta", "iupac_fasta", "display_rug_kde_plot"]
 
 
 @dataclass(frozen=True)
@@ -122,8 +122,7 @@ class ClusterSettings:
     public_base_url: str = ""
     max_concurrent_jobs: int = 1
     timeout_seconds: int = 3600
-    input_output_key: str = "export_iupac_fasta"
-    header_suffix_to_strip: str = "-0.15-iupac"
+    input_output_key: str = "iupac_fasta"
     five_prime_trim: int = 50
     poly_t: bool = True
     poly_t_min_length: int = 10
@@ -335,8 +334,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
             public_base_url=str(cluster_raw.get("public_base_url", "")).rstrip("/"),
             max_concurrent_jobs=max(1, int(cluster_raw.get("max_concurrent_jobs", 1))),
             timeout_seconds=max(1, int(cluster_raw.get("timeout_seconds", 3600))),
-            input_output_key=str(cluster_raw.get("input_output_key", "export_iupac_fasta")),
-            header_suffix_to_strip=str(cluster_raw.get("header_suffix_to_strip", "-0.15-iupac")),
+            input_output_key=str(cluster_raw.get("input_output_key", "iupac_fasta")),
             five_prime_trim=max(0, int(cluster_raw.get("five_prime_trim", 50))),
             poly_t=bool(cluster_raw.get("poly_t", cluster_raw.get("poly_a", True))),
             poly_t_min_length=max(1, int(cluster_raw.get("poly_t_min_length", 10))),

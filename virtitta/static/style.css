@@ -328,6 +328,12 @@ a:hover {
   text-align: left;
 }
 
+.action-menu-list .inline-option {
+  display: grid;
+  gap: 3px;
+  font-size: 0.88rem;
+}
+
 .column-toggle-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

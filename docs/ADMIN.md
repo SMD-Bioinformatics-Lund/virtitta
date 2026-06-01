@@ -59,8 +59,9 @@ igv_js_url = "/static/igv.min.js"
 ```
 
 webIGV serves track files through authenticated Virtitta routes using `results_roots[].linux_path`. The mounted result
-root should be read-only for the Virtitta process. VCF tracks are loaded when the VirPipa QC JSON reports the VCF output
-and either a matching explicit index output such as `filtered_vcf_m005_index` or a `<vcf>.csi` sidecar exists on disk.
+root should be read-only for the Virtitta process. Index sidecars may be explicit in the VirPipa QC JSON or inferred
+from standard filenames: `<fasta>.fai`, `<cram>.crai`, and `<vcf>.csi`. Import and refresh fail if a required sidecar is
+missing for a reported FASTA, CRAM, or VCF output.
 
 webIGV disables IGV.js' browser-side CRAM slice MD5 check. VirPipa writes CRAMs against the sample FASTA, and Virtitta
 serves the matching FASTA, FAI, CRAM, and CRAI files from the imported QC JSON. In practice IGV.js can still ask the
@@ -81,8 +82,7 @@ grapetree_url = "https://mtlucmds1.lund.skane.se/grapetree/"
 public_base_url = "https://virtitta.example.org"
 max_concurrent_jobs = 1
 timeout_seconds = 3600
-input_output_key = "export_iupac_fasta"
-header_suffix_to_strip = "-0.15-iupac"
+input_output_key = "iupac_fasta"
 five_prime_trim = 50
 poly_t = true
 poly_t_min_length = 10
@@ -102,7 +102,7 @@ For the local conda workflow, install the command-line tools into the same envir
 micromamba install -c conda-forge -c bioconda mafft iqtree
 ```
 
-V1 uses the imported `export_iupac_fasta` output for each selected sample, removes the configured FASTA header suffix,
+V1 uses the imported `iupac_fasta` output for each selected sample, derives tree IDs from Virtitta sample metadata,
 trims the configured number of 5' bases, trims a poly-T tail only when at most `poly_t_max_trailing_bases` follow the
 T-rich seed. Exact T runs of at least `poly_t_min_length` are trimmed, and fuzzy tails are trimmed when a
 `poly_t_seed_length` window contains at least `poly_t_seed_min_t` T bases. The prepared FASTA is aligned with MAFFT, then
@@ -145,6 +145,10 @@ Import one completed VirPipa run:
 ```bash
 python -m virtitta.cli import-run --config virtitta.toml --run-dir /path/to/results/<run_name>
 ```
+
+`import-run` accepts both flat sample directories (`<run>/<sample>/<sample>_qc_summary.json`) and the legacy nested
+layout (`<run>/<sample>/results/<sample>_qc_summary.json`). Result file paths in QC JSON are resolved relative to the
+directory containing the QC summary.
 
 If restored runs need external Clarity metadata:
 

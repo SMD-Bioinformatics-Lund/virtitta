@@ -27,9 +27,13 @@ The interface is designed for efficient day-to-day review rather than presentati
 
 Virtitta does not scrape raw pipeline outputs directly. It imports the structured run summaries produced by `virpipa`:
 
-- `results/<run_name>/<sample_id>/results/<sample_id>_qc_summary.json`
+- flat archive layout: `<root>/<run_name>/<sample_id>/<sample_id>_qc_summary.json`
+- legacy layout: `<root>/<run_name>/<sample_id>/results/<sample_id>_qc_summary.json`
 
 Each per-sample JSON includes the QC values shown in the table plus relative paths to important result files.
+Virtitta resolves those paths relative to the directory containing the QC summary. FASTA, CRAM, and VCF index sidecars
+may be omitted from the JSON when they use the standard `.fai`, `.crai`, and `.csi` filenames; import fails with a clear
+message if a required sidecar is missing.
 
 ## Configuration
 
@@ -130,7 +134,7 @@ PYTHONPATH=$PWD python -m virtitta.cli serve --config virtitta.toml --host 0.0.0
 
 ## Add Samples From A New Run
 
-After a `virpipa` run finishes and contains per-sample `*_qc_summary.json` files under each sample `results/` directory, import it into Virtitta:
+After a `virpipa` run finishes and contains per-sample `*_qc_summary.json` files under each sample directory, import it into Virtitta:
 
 ```bash
 PYTHONPATH=$PWD python -m virtitta.cli import-run \
@@ -320,9 +324,9 @@ Save location behavior:
 - if `exports.lims_root` is not configured, the default export action reports that as a warning instead of silently failing
 - the main table export dropdown also supports clipboard export of:
   - the currently visible main table
-  - selected export FASTA records
-  - selected 15% IUPAC FASTA records
-- the two FASTA clipboard exports and the rug/KDE image are served from the local output cache when present
+  - selected FASTA records, with LID or sample ID headers
+  - selected 15% IUPAC FASTA records, with LID or sample ID headers
+- the canonical FASTA outputs and rug/KDE image are served from the local output cache when present
 
 ## Next Work
 

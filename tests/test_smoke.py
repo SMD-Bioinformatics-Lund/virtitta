@@ -198,8 +198,7 @@ class VirtittaSmokeTests(unittest.TestCase):
                 f"{public_base_url_line}"
                 "max_concurrent_jobs = 1\n"
                 "timeout_seconds = 60\n"
-                'input_output_key = "export_iupac_fasta"\n'
-                'header_suffix_to_strip = "-0.15-iupac"\n'
+                'input_output_key = "iupac_fasta"\n'
                 f"five_prime_trim = {five_prime_trim}\n"
                 "poly_t = true\n"
                 "poly_t_min_length = 10\n"
@@ -217,6 +216,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self,
         *,
         subtype: str = "1a",
+        lid: str = "LID002",
         tree_id: str = "LID002-0.15-iupac",
         sequence: str = "ACGTAAAA",
     ) -> None:
@@ -224,13 +224,46 @@ class VirtittaSmokeTests(unittest.TestCase):
         sample = json.loads(json.dumps(fixture))
         sample["sample_id"] = "SAMPLE002"
         sample["sample_run_id"] = "SAMPLE002_fixture_run"
-        sample["lid"] = "LID002"
+        sample["lid"] = lid
         sample["typing"]["report_subtype"] = subtype
-        sample["outputs"]["export_iupac_fasta"] = "lid/LID002-0.15-iupac.fasta"
+        sample["outputs"] = dict(sample["outputs"])
+        for key, value in list(sample["outputs"].items()):
+            if isinstance(value, str):
+                sample["outputs"][key] = value.replace("SAMPLE001", "SAMPLE002").replace("LID001", lid)
+        sample["outputs"]["export_iupac_fasta"] = f"lid/{lid}-0.15-iupac.fasta"
         self.write_sample_summary(sample)
+        sample2_dir = self.run_dir / "SAMPLE002" / "results"
+        for filename in [
+            "SAMPLE002_rug_kde_plot.png",
+            "SAMPLE002.fasta",
+            "SAMPLE002.fasta.fai",
+            "SAMPLE002.cram",
+            "SAMPLE002.cram.crai",
+            "SAMPLE002-pilon-m0.05.vcf.gz",
+            "SAMPLE002-pilon-m0.05.vcf.gz.csi",
+            "SAMPLE002-pilon-m0.1.vcf.gz",
+            "SAMPLE002-pilon-m0.1.vcf.gz.csi",
+            "SAMPLE002-pilon-m0.15.vcf.gz",
+            "SAMPLE002-pilon-m0.15.vcf.gz.csi",
+            "SAMPLE002-pilon-m0.2.vcf.gz",
+            "SAMPLE002-pilon-m0.2.vcf.gz.csi",
+            "SAMPLE002-pilon-m0.3.vcf.gz",
+            "SAMPLE002-pilon-m0.3.vcf.gz.csi",
+            "SAMPLE002-pilon-m0.4.vcf.gz",
+            "SAMPLE002-pilon-m0.4.vcf.gz.csi",
+            "SAMPLE002.vadr.bed",
+            "SAMPLE002_resistance.gff",
+            "SAMPLE002.vadr.pass_mod.gff",
+            "SAMPLE002.fasta.blast",
+        ]:
+            (sample2_dir / filename).write_text("placeholder", encoding="utf-8")
+        (sample2_dir / "SAMPLE002-0.15-iupac.fasta").write_text(
+            f">{tree_id}\n{sequence}\n",
+            encoding="utf-8",
+        )
         sample2_lid_dir = self.run_dir / "SAMPLE002" / "results" / "lid"
         sample2_lid_dir.mkdir(parents=True, exist_ok=True)
-        (sample2_lid_dir / "LID002-0.15-iupac.fasta").write_text(
+        (sample2_lid_dir / f"{lid}-0.15-iupac.fasta").write_text(
             f">{tree_id}\n{sequence}\n",
             encoding="utf-8",
         )
@@ -293,6 +326,27 @@ class VirtittaSmokeTests(unittest.TestCase):
         clarity_path.write_text(json.dumps(entries), encoding="utf-8")
         return clarity_path
 
+    def write_required_sidecar_outputs(self, sample_dir: Path, sample_id: str) -> None:
+        for filename in [
+            f"{sample_id}.fasta",
+            f"{sample_id}.fasta.fai",
+            f"{sample_id}.cram",
+            f"{sample_id}.cram.crai",
+            f"{sample_id}-pilon-m0.05.vcf.gz",
+            f"{sample_id}-pilon-m0.05.vcf.gz.csi",
+            f"{sample_id}-pilon-m0.1.vcf.gz",
+            f"{sample_id}-pilon-m0.1.vcf.gz.csi",
+            f"{sample_id}-pilon-m0.15.vcf.gz",
+            f"{sample_id}-pilon-m0.15.vcf.gz.csi",
+            f"{sample_id}-pilon-m0.2.vcf.gz",
+            f"{sample_id}-pilon-m0.2.vcf.gz.csi",
+            f"{sample_id}-pilon-m0.3.vcf.gz",
+            f"{sample_id}-pilon-m0.3.vcf.gz.csi",
+            f"{sample_id}-pilon-m0.4.vcf.gz",
+            f"{sample_id}-pilon-m0.4.vcf.gz.csi",
+        ]:
+            (sample_dir / filename).write_text("placeholder", encoding="utf-8")
+
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.tmp_path = Path(self.temp_dir.name)
@@ -312,17 +366,28 @@ class VirtittaSmokeTests(unittest.TestCase):
             "SAMPLE001.cram",
             "SAMPLE001.cram.crai",
             "SAMPLE001-pilon-m0.05.vcf.gz",
+            "SAMPLE001-pilon-m0.05.vcf.gz.csi",
             "SAMPLE001-pilon-m0.1.vcf.gz",
+            "SAMPLE001-pilon-m0.1.vcf.gz.csi",
             "SAMPLE001-pilon-m0.15.vcf.gz",
+            "SAMPLE001-pilon-m0.15.vcf.gz.csi",
             "SAMPLE001-pilon-m0.2.vcf.gz",
+            "SAMPLE001-pilon-m0.2.vcf.gz.csi",
             "SAMPLE001-pilon-m0.3.vcf.gz",
+            "SAMPLE001-pilon-m0.3.vcf.gz.csi",
             "SAMPLE001-pilon-m0.4.vcf.gz",
+            "SAMPLE001-pilon-m0.4.vcf.gz.csi",
             "SAMPLE001.vadr.bed",
             "SAMPLE001_resistance.gff",
             "SAMPLE001.vadr.pass_mod.gff",
             "SAMPLE001.fasta.blast",
         ]:
             (self.sample_dir / filename).write_text("placeholder", encoding="utf-8")
+        (self.sample_dir / "SAMPLE001.fasta").write_text(">SAMPLE001\nACGT\n", encoding="utf-8")
+        (self.sample_dir / "SAMPLE001-0.15-iupac.fasta").write_text(
+            ">SAMPLE001-0.15-iupac\nARYT\n",
+            encoding="utf-8",
+        )
         (self.sample_dir / "lid").mkdir(parents=True)
         (self.sample_dir / "lid" / "LID001-2limsrs.txt").write_text(
             "sample_id\tparameter_name\tparameter_value\tcomment\n"
@@ -385,6 +450,45 @@ class VirtittaSmokeTests(unittest.TestCase):
             ),
         )
 
+    def test_import_run_accepts_flat_sample_layout(self) -> None:
+        run_dir = self.root / "flat_run"
+        sample_dir = run_dir / "SAMPLE001"
+        sample_dir.mkdir(parents=True)
+        sample = json.loads(json.dumps(json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))[0]))
+        sample["run_name"] = "flat_run"
+        sample["sample_run_id"] = "SAMPLE001_flat_run"
+        (sample_dir / "SAMPLE001_qc_summary.json").write_text(json.dumps(sample), encoding="utf-8")
+        self.write_required_sidecar_outputs(sample_dir, "SAMPLE001")
+
+        config = load_config(self.config_path)
+        imported = import_run(config, run_dir)
+
+        conn = connect(config.database.path)
+        try:
+            sample_row = get_sample(conn, "SAMPLE001_flat_run")
+        finally:
+            conn.close()
+
+        self.assertEqual(imported, 1)
+        self.assertIsNotNone(sample_row)
+        assert sample_row is not None
+        self.assertEqual(sample_row["sample_results_relpath"], "flat_run/SAMPLE001")
+
+    def test_import_run_rejects_ambiguous_flat_and_legacy_layouts(self) -> None:
+        flat_summary = self.run_dir / "SAMPLE001" / "SAMPLE001_qc_summary.json"
+        flat_summary.write_text((self.sample_dir / "SAMPLE001_qc_summary.json").read_text(encoding="utf-8"), encoding="utf-8")
+
+        config = load_config(self.config_path)
+        with self.assertRaisesRegex(ValueError, "Ambiguous QC summary layout"):
+            import_run(config, self.run_dir)
+
+    def test_import_run_fails_when_required_sidecar_is_missing(self) -> None:
+        (self.sample_dir / "SAMPLE001.cram.crai").unlink()
+
+        config = load_config(self.config_path)
+        with self.assertRaisesRegex(FileNotFoundError, "main_cram_index"):
+            import_run(config, self.run_dir)
+
     def test_import_run_derives_sequencing_date_from_run_name_prefix(self) -> None:
         run_name = "260317_A00681_1225_AHJMKLDRX7"
         run_dir = self.root / run_name
@@ -396,6 +500,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         summary_path = run_dir / sample["sample_id"] / "results" / f"{sample['sample_id']}_qc_summary.json"
         summary_path.parent.mkdir(parents=True)
         summary_path.write_text(json.dumps(sample), encoding="utf-8")
+        self.write_required_sidecar_outputs(summary_path.parent, sample["sample_id"])
 
         config = load_config(self.config_path)
         import_run(config, run_dir)
@@ -1020,7 +1125,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(config.ui.column_max_widths, {})
         self.assertEqual(
             config.cache.output_keys,
-            ["export_fasta", "export_iupac_fasta", "display_rug_kde_plot"],
+            ["main_fasta", "iupac_fasta", "display_rug_kde_plot"],
         )
         self.assertEqual(config.cache.outputs_root, self.tmp_path / "data" / "output_cache")
         self.assertFalse(config.auth.enabled)
@@ -1629,7 +1734,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIs(cram_track["checkSequenceMD5"], False)
         self.assertIs(cram_track["showSoftClips"], True)
         self.assertIn("VADR BED", track_names)
-        self.assertNotIn("VCF m0.05", track_names)
+        self.assertIn("VCF m0.05", track_names)
 
     def test_webigv_config_loads_vcf_with_existing_csi_sidecar(self) -> None:
         (self.sample_dir / "SAMPLE001-pilon-m0.05.vcf.gz.csi").write_text("placeholder", encoding="utf-8")
@@ -1707,7 +1812,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(config.cluster.output_root, self.tmp_path / "clusters")
         self.assertEqual(config.cluster.grapetree_url, "https://mtlucmds1.lund.skane.se/grapetree/")
         self.assertEqual(config.cluster.public_base_url, "")
-        self.assertEqual(config.cluster.input_output_key, "export_iupac_fasta")
+        self.assertEqual(config.cluster.input_output_key, "iupac_fasta")
         self.assertEqual(config.cluster.iqtree_command, "iqtree3")
         self.assertEqual(config.cluster.mafft_args, ["--auto"])
         self.assertEqual(config.cluster.iqtree_threads, 4)
@@ -1743,9 +1848,9 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("comment_count", metadata)
         self.assertIn("LID002\tLID002\tSAMPLE002\t2026-04-08\t2026-04-08\t\tunreviewed\t\t1a", metadata)
 
-    def test_prepare_cluster_files_blocks_duplicate_normalized_tree_ids(self) -> None:
+    def test_prepare_cluster_files_blocks_duplicate_metadata_tree_ids(self) -> None:
         self.enable_cluster()
-        self.add_second_sample_summary(tree_id="LID001-0.15-iupac")
+        self.add_second_sample_summary(lid="LID001", tree_id="LID002-0.15-iupac")
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
         conn = connect(config.database.path)
@@ -1768,10 +1873,43 @@ class VirtittaSmokeTests(unittest.TestCase):
         sample["sample_id"] = "SAMPLE002"
         sample["sample_run_id"] = "SAMPLE002_fixture_run_2"
         sample["lid"] = "LID001"
+        sample["outputs"] = dict(sample["outputs"])
+        for key, value in list(sample["outputs"].items()):
+            if isinstance(value, str):
+                sample["outputs"][key] = value.replace("SAMPLE001", "SAMPLE002")
         sample["outputs"]["export_iupac_fasta"] = "lid/LID001-0.15-iupac.fasta"
         summary_path = second_run_dir / "SAMPLE002" / "results" / "SAMPLE002_qc_summary.json"
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         summary_path.write_text(json.dumps(sample), encoding="utf-8")
+        sample2_dir = second_run_dir / "SAMPLE002" / "results"
+        for filename in [
+            "SAMPLE002_rug_kde_plot.png",
+            "SAMPLE002.fasta",
+            "SAMPLE002.fasta.fai",
+            "SAMPLE002.cram",
+            "SAMPLE002.cram.crai",
+            "SAMPLE002-pilon-m0.05.vcf.gz",
+            "SAMPLE002-pilon-m0.05.vcf.gz.csi",
+            "SAMPLE002-pilon-m0.1.vcf.gz",
+            "SAMPLE002-pilon-m0.1.vcf.gz.csi",
+            "SAMPLE002-pilon-m0.15.vcf.gz",
+            "SAMPLE002-pilon-m0.15.vcf.gz.csi",
+            "SAMPLE002-pilon-m0.2.vcf.gz",
+            "SAMPLE002-pilon-m0.2.vcf.gz.csi",
+            "SAMPLE002-pilon-m0.3.vcf.gz",
+            "SAMPLE002-pilon-m0.3.vcf.gz.csi",
+            "SAMPLE002-pilon-m0.4.vcf.gz",
+            "SAMPLE002-pilon-m0.4.vcf.gz.csi",
+            "SAMPLE002.vadr.bed",
+            "SAMPLE002_resistance.gff",
+            "SAMPLE002.vadr.pass_mod.gff",
+            "SAMPLE002.fasta.blast",
+        ]:
+            (sample2_dir / filename).write_text("placeholder", encoding="utf-8")
+        (sample2_dir / "SAMPLE002-0.15-iupac.fasta").write_text(
+            ">SAMPLE002-0.15-iupac\nACGTAAAA\n",
+            encoding="utf-8",
+        )
         lid_dir = second_run_dir / "SAMPLE002" / "results" / "lid"
         lid_dir.mkdir(parents=True, exist_ok=True)
         (lid_dir / "LID001-0.15-iupac.fasta").write_text(">LID001-0.15-iupac\nACGTAAAA\n", encoding="utf-8")
@@ -2025,13 +2163,21 @@ class VirtittaSmokeTests(unittest.TestCase):
         for filename in [
             "SAMPLE002_rug_kde_plot.png",
             "SAMPLE002.fasta",
+            "SAMPLE002.fasta.fai",
             "SAMPLE002.cram",
+            "SAMPLE002.cram.crai",
             "SAMPLE002-pilon-m0.05.vcf.gz",
+            "SAMPLE002-pilon-m0.05.vcf.gz.csi",
             "SAMPLE002-pilon-m0.1.vcf.gz",
+            "SAMPLE002-pilon-m0.1.vcf.gz.csi",
             "SAMPLE002-pilon-m0.15.vcf.gz",
+            "SAMPLE002-pilon-m0.15.vcf.gz.csi",
             "SAMPLE002-pilon-m0.2.vcf.gz",
+            "SAMPLE002-pilon-m0.2.vcf.gz.csi",
             "SAMPLE002-pilon-m0.3.vcf.gz",
+            "SAMPLE002-pilon-m0.3.vcf.gz.csi",
             "SAMPLE002-pilon-m0.4.vcf.gz",
+            "SAMPLE002-pilon-m0.4.vcf.gz.csi",
             "SAMPLE002.vadr.bed",
             "SAMPLE002_resistance.gff",
             "SAMPLE002.vadr.pass_mod.gff",
@@ -2176,7 +2322,14 @@ class VirtittaSmokeTests(unittest.TestCase):
         clear["resistance"]["mutation_count"] = 0
         clear["resistance"]["by_drug"] = []
         clear["resistance"]["mutations"] = []
+        clear["outputs"] = dict(clear["outputs"])
+        for key, value in list(clear["outputs"].items()):
+            if isinstance(value, str):
+                clear["outputs"][key] = value.replace("SAMPLE001", "SAMPLE002").replace("LID001", "LID002")
         self.write_run_summaries([resistant, clear])
+        sample2_dir = self.run_dir / "SAMPLE002" / "results"
+        self.write_required_sidecar_outputs(sample2_dir, "SAMPLE002")
+        (sample2_dir / "SAMPLE002-0.15-iupac.fasta").write_text(">SAMPLE002-0.15-iupac\nARYT\n", encoding="utf-8")
 
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
@@ -2271,6 +2424,10 @@ class VirtittaSmokeTests(unittest.TestCase):
             build_fasta_clipboard_content(config, [sample], "export_iupac_fasta"),
             ">LID001-0.15-iupac\nARYT\n",
         )
+        self.assertEqual(
+            build_fasta_clipboard_content(config, [sample], "export_iupac_fasta", "sample_id"),
+            ">SAMPLE001-0.15-iupac\nARYT\n",
+        )
 
     def test_import_run_caches_configured_outputs(self) -> None:
         config = load_config(self.config_path)
@@ -2291,13 +2448,13 @@ class VirtittaSmokeTests(unittest.TestCase):
             self.assertTrue(cache_path.is_file())
         self.assertEqual(
             (config.cache.outputs_root / entries[0]["cached_relpath"]).read_text(encoding="utf-8"),
-            ">LID001\nACGT\n",
+            ">SAMPLE001\nACGT\n",
         )
 
     def test_fasta_clipboard_content_reads_cached_output(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
-        (self.sample_dir / "lid" / "LID001.fasta").write_text(">REMOTE\nTTTT\n", encoding="utf-8")
+        (self.sample_dir / "SAMPLE001.fasta").write_text(">REMOTE\nTTTT\n", encoding="utf-8")
         conn = connect(config.database.path)
         try:
             sample = get_sample(conn, "SAMPLE001_fixture_run")
@@ -2316,7 +2473,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         import_run(config, self.run_dir)
         conn = connect(config.database.path)
         try:
-            old_entry = get_output_cache_entry(conn, "SAMPLE001_fixture_run", "export_fasta")
+            old_entry = get_output_cache_entry(conn, "SAMPLE001_fixture_run", "main_fasta")
         finally:
             conn.close()
         assert old_entry is not None
@@ -2327,23 +2484,25 @@ class VirtittaSmokeTests(unittest.TestCase):
         updated = fixture[0]
         updated["generated_at_utc"] = "2026-04-08T09:12:34Z"
         updated["outputs"] = dict(updated["outputs"])
-        updated["outputs"]["export_fasta"] = "lid/LID001-v2.fasta"
+        updated["outputs"]["main_fasta"] = "SAMPLE001-v2.fasta"
+        updated["outputs"]["main_fasta_index"] = "SAMPLE001-v2.fasta.fai"
         self.write_run_summaries([updated])
-        (self.sample_dir / "lid" / "LID001-v2.fasta").write_text(">LID001\nTGCA\n", encoding="utf-8")
+        (self.sample_dir / "SAMPLE001-v2.fasta").write_text(">SAMPLE001\nTGCA\n", encoding="utf-8")
+        (self.sample_dir / "SAMPLE001-v2.fasta.fai").write_text("placeholder", encoding="utf-8")
 
         import_run(config, self.run_dir)
         conn = connect(config.database.path)
         try:
-            new_entry = get_output_cache_entry(conn, "SAMPLE001_fixture_run", "export_fasta")
+            new_entry = get_output_cache_entry(conn, "SAMPLE001_fixture_run", "main_fasta")
         finally:
             conn.close()
 
         assert new_entry is not None
         self.assertFalse(old_cache_path.exists())
-        self.assertEqual(new_entry["remote_relpath"], "lid/LID001-v2.fasta")
+        self.assertEqual(new_entry["remote_relpath"], "SAMPLE001-v2.fasta")
         self.assertEqual(
             (config.cache.outputs_root / new_entry["cached_relpath"]).read_text(encoding="utf-8"),
-            ">LID001\nTGCA\n",
+            ">SAMPLE001\nTGCA\n",
         )
 
     def test_sample_file_serves_cached_kde_image(self) -> None:
@@ -2548,7 +2707,7 @@ class VirtittaSmokeTests(unittest.TestCase):
     def test_verify_cache_detects_stale_remote_output(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
-        (self.sample_dir / "lid" / "LID001.fasta").write_text(">LID001\nTGCA\n", encoding="utf-8")
+        (self.sample_dir / "SAMPLE001.fasta").write_text(">SAMPLE001\nTGCA\n", encoding="utf-8")
 
         conn = connect(config.database.path)
         try:
@@ -2559,8 +2718,8 @@ class VirtittaSmokeTests(unittest.TestCase):
             conn.close()
 
         statuses = {item["output_key"]: item["status"] for item in results}
-        self.assertEqual(statuses["export_fasta"], CACHE_STALE)
-        self.assertEqual(statuses["export_iupac_fasta"], CACHE_OK)
+        self.assertEqual(statuses["main_fasta"], CACHE_STALE)
+        self.assertEqual(statuses["iupac_fasta"], CACHE_OK)
 
     def test_all_run_cache_verification_rows_skip_manual_failed_samples(self) -> None:
         config = load_config(self.config_path)

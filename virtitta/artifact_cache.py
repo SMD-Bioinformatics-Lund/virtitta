@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from virtitta.config import Config
+from virtitta.outputs import effective_output_relname, safe_relative_path
 from virtitta.repository import (
     delete_output_cache_entry,
     get_output_cache_entry,
@@ -27,16 +28,16 @@ def is_cacheable_output(config: Config, output_key: str) -> bool:
 
 
 def safe_output_path(sample_dir: Path, relname: str) -> Path:
-    relpath = Path(relname)
-    if relpath.is_absolute() or ".." in relpath.parts:
-        raise ValueError("Unsafe file path")
-    return sample_dir / relpath
+    try:
+        return safe_relative_path(sample_dir, relname)
+    except ValueError as exc:
+        raise ValueError("Unsafe file path") from exc
 
 
 def remote_output_path(config: Config, sample_row: dict, output_key: str) -> tuple[Path, str] | None:
     raw = raw_json_for_sample(sample_row)
     outputs = raw.get("outputs", {}) if isinstance(raw, dict) else {}
-    relname = outputs.get(output_key)
+    relname = effective_output_relname(output_key, outputs)
     if not relname:
         return None
 

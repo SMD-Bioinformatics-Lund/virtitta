@@ -166,6 +166,12 @@
         <div class="action-menu-list">
           <button type="submit" formaction="{{ request.url_for('bulk_lims_export_download') }}" formmethod="post" class="secondary">Browser download</button>
           <button type="button" class="secondary" data-export-table>Table to clipboard</button>
+          <label class="inline-option">FASTA ID
+            <select name="fasta_header_id" id="fasta-header-id">
+              <option value="lid">LID</option>
+              <option value="sample_id">Sample ID</option>
+            </select>
+          </label>
           <button type="button" class="secondary" data-export-clipboard="{{ request.url_for('bulk_fasta_clipboard_export') }}">FASTA to clipboard</button>
           <button type="button" class="secondary" data-export-clipboard="{{ request.url_for('bulk_iupac_fasta_clipboard_export') }}">15% IUPAC FASTA to clipboard</button>
         </div>
@@ -636,6 +642,10 @@ async function fetchClipboardExport(url, title) {
   const formData = new FormData();
   if (csrfToken) {
     formData.append('csrf_token', csrfToken);
+  }
+  const headerId = document.getElementById('fasta-header-id');
+  if (headerId) {
+    formData.append('header_id', headerId.value);
   }
   for (const id of ids) {
     formData.append('sample_run_id', id);

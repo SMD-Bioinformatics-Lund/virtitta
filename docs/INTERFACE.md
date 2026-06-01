@@ -79,8 +79,9 @@ The default `Export LIMS` action writes server-side files under:
 
 Repeated exports create unique filenames instead of overwriting existing files.
 
-The FASTA clipboard exports use imported `export_*` paths from the VirPipa QC JSON. When configured and populated,
-Virtitta serves these from the local output cache.
+The FASTA clipboard exports use canonical `main_fasta` and `iupac_fasta` outputs, falling back to legacy `export_*`
+outputs for older imports. The export menu lets the operator choose LID or sample ID headers; LID is the default.
+When configured and populated, Virtitta serves these from the local output cache.
 
 ## Notifications
 
@@ -117,8 +118,8 @@ Virtitta can expose two IGV workflows when configured:
   same drive mappings as the desktop IGV setup.
 
 webIGV loads files through imported VirPipa `outputs` JSON paths. It uses the indexed sample FASTA as the reference,
-the main CRAM when its index is available, BED/GFF annotation tracks, and VCF tracks when an explicit VCF index output
-key was imported or a matching `.csi` sidecar exists next to the imported VCF.
+the main CRAM when its index is available, BED/GFF annotation tracks, and VCF tracks. FASTA, CRAM, and VCF indexes can
+be explicit in QC JSON or inferred from standard `.fai`, `.crai`, and `.csi` sidecar filenames.
 
 ## Manual Metadata Overrides
 

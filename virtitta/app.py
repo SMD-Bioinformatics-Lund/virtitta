@@ -47,6 +47,12 @@ from virtitta.cluster import (
     write_command_snapshot,
 )
 from virtitta.config import DEFAULT_COLUMN_LABELS, QC_STATUS_OPTIONS, Config, load_config
+from virtitta.outputs import (
+    effective_output_key,
+    effective_output_relname,
+    inferred_index_relname,
+    safe_relative_path,
+)
 from virtitta.repository import (
     add_comment,
     add_samples_to_group,
@@ -81,8 +87,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 DETAIL_FILE_LINKS = [
-    ("Export FASTA", "export_fasta"),
-    ("Export 0.15 IUPAC FASTA", "export_iupac_fasta"),
     ("Main FASTA", "main_fasta"),
     ("Main BLAST", "main_blast"),
     ("Main CRAM", "main_cram"),
@@ -94,12 +98,9 @@ DETAIL_FILE_LINKS = [
     ("VADR BED", "vadr_bed"),
     ("Selected VADR GFF", "selected_vadr_gff"),
     ("Display Rug Plot", "display_rug_kde_plot"),
-    ("LID 2limsrs", "lid_2limsrs"),
 ]
 
 VIEWABLE_DETAIL_OUTPUT_KEYS = {
-    "export_fasta",
-    "export_iupac_fasta",
     "main_fasta",
     "main_blast",
     "iupac_fasta",
@@ -108,7 +109,6 @@ VIEWABLE_DETAIL_OUTPUT_KEYS = {
     "resistance_gff",
     "vadr_bed",
     "selected_vadr_gff",
-    "lid_2limsrs",
 }
 
 IGV_TRACK_LINKS = [
@@ -138,7 +138,6 @@ WEBIGV_VCF_TRACKS = [
     ("VCF m0.3", "filtered_vcf_m03"),
     ("VCF m0.4", "filtered_vcf_m04"),
 ]
-WEBIGV_VCF_OUTPUT_KEYS = {key for _label, key in WEBIGV_VCF_TRACKS}
 WEBIGV_ALLOWED_OUTPUT_KEYS = {
     "main_fasta",
     "main_fasta_index",
@@ -506,10 +505,10 @@ def build_resistance_mutations(raw_sample: dict, sample_id: str) -> list[dict]:
 
 
 def safe_output_path(sample_dir: Path, relname: str) -> Path:
-    relpath = Path(relname)
-    if relpath.is_absolute() or ".." in relpath.parts:
-        raise HTTPException(status_code=400, detail="Unsafe file path")
-    return sample_dir / relpath
+    try:
+        return safe_relative_path(sample_dir, relname)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Unsafe file path") from exc
 
 
 def effective_outputs(config: Config, sample_row, raw_sample: dict | None = None) -> dict:
@@ -543,7 +542,7 @@ def resolve_sample_results_dir(config: Config, sample_row) -> Path:
 
 def resolve_output_file(config: Config, sample_row, output_key: str) -> tuple[Path, str]:
     outputs = effective_outputs(config, sample_row)
-    relname = outputs.get(output_key)
+    relname = effective_output_relname(output_key, outputs)
     if not relname:
         raise HTTPException(status_code=404, detail=f"Output not available: {output_key}")
 
@@ -555,22 +554,12 @@ def resolve_output_file(config: Config, sample_row, output_key: str) -> tuple[Pa
 
 
 def inferred_webigv_index_relname(outputs: dict, output_key: str) -> str | None:
-    if not output_key.endswith("_index"):
-        return None
-
-    base_output_key = output_key.removesuffix("_index")
-    if base_output_key not in WEBIGV_VCF_OUTPUT_KEYS:
-        return None
-
-    relname = outputs.get(base_output_key)
-    if not relname:
-        return None
-    return f"{relname}.csi"
+    return inferred_index_relname(outputs, output_key)
 
 
 def resolve_webigv_output_file(config: Config, sample_row, output_key: str) -> tuple[Path, str]:
     outputs = effective_outputs(config, sample_row)
-    relname = outputs.get(output_key) or inferred_webigv_index_relname(outputs, output_key)
+    relname = effective_output_relname(output_key, outputs) or inferred_webigv_index_relname(outputs, output_key)
     if not relname:
         raise HTTPException(status_code=404, detail=f"Output not available: {output_key}")
 
@@ -582,7 +571,7 @@ def resolve_webigv_output_file(config: Config, sample_row, output_key: str) -> t
 
 
 def webigv_output_exists(config: Config, sample_row, outputs: dict, output_key: str) -> bool:
-    relname = outputs.get(output_key) or inferred_webigv_index_relname(outputs, output_key)
+    relname = effective_output_relname(output_key, outputs) or inferred_webigv_index_relname(outputs, output_key)
     if not relname:
         return False
 
@@ -682,18 +671,53 @@ def build_grapetree_url(config: Config, request: Request, job: dict) -> str:
     return f"{config.cluster.grapetree_url}?{urlencode({'tree': tree_url})}"
 
 
-def build_fasta_clipboard_content(config: Config, sample_rows: list[dict], output_key: str) -> str:
+def fasta_export_header(sample_row: dict, header_id: str, output_key: str) -> str:
+    if header_id == "sample_id":
+        identifier = sample_row.get("sample_id") or sample_row.get("lid") or sample_row.get("sample_run_id")
+    else:
+        identifier = sample_row.get("lid") or sample_row.get("sample_id") or sample_row.get("sample_run_id")
+    header = str(identifier or "sample")
+    if output_key == "export_iupac_fasta":
+        header = f"{header}-0.15-iupac"
+    return header
+
+
+def rewrite_fasta_headers(text: str, header: str) -> str:
+    lines = text.splitlines()
+    rewritten: list[str] = []
+    record_count = 0
+    for line in lines:
+        if line.startswith(">"):
+            record_count += 1
+            record_header = header if record_count == 1 else f"{header}_{record_count}"
+            rewritten.append(f">{record_header}")
+        else:
+            rewritten.append(line)
+    result = "\n".join(rewritten)
+    if result and not result.endswith("\n"):
+        result = f"{result}\n"
+    return result
+
+
+def build_fasta_clipboard_content(
+    config: Config,
+    sample_rows: list[dict],
+    output_key: str,
+    header_id: str = "lid",
+) -> str:
     chunks: list[str] = []
     connection = connect(config.database.path)
     try:
         for sample_row in sample_rows:
             file_path = get_cached_output_file(config, connection, sample_row["sample_run_id"], output_key)
             if file_path is None:
+                source_key = effective_output_key(output_key, effective_outputs(config, sample_row))
+                if source_key and source_key != output_key:
+                    file_path = get_cached_output_file(config, connection, sample_row["sample_run_id"], source_key)
+            if file_path is None:
                 file_path, _ = resolve_output_file(config, sample_row, output_key)
             text = file_path.read_text(encoding="utf-8")
-            if text and not text.endswith("\n"):
-                text = f"{text}\n"
-            chunks.append(text)
+            chunks.append(rewrite_fasta_headers(text, fasta_export_header(sample_row, header_id, output_key)))
     finally:
         connection.close()
     return "".join(chunks)
@@ -783,7 +807,7 @@ def build_igv_url(config: Config, sample_row, outputs: dict | None = None) -> st
     sample_windows_root = PureWindowsPath(root.windows_path)
 
     def convert_output(key: str) -> str | None:
-        relname = resolved_outputs.get(key)
+        relname = effective_output_relname(key, resolved_outputs)
         if not relname:
             return None
         windows_path = sample_windows_root.joinpath(PureWindowsPath(sample_rel.as_posix())).joinpath(relname)
@@ -836,7 +860,7 @@ def webigv_enabled(config: Config) -> bool:
 
 
 def webigv_available(outputs: dict) -> bool:
-    return bool(outputs.get("main_fasta") and outputs.get("main_fasta_index"))
+    return bool(effective_output_relname("main_fasta", outputs) and effective_output_relname("main_fasta_index", outputs))
 
 
 def webigv_track_url(request: Request, sample_run_id: str, output_key: str) -> str:
@@ -844,7 +868,7 @@ def webigv_track_url(request: Request, sample_run_id: str, output_key: str) -> s
 
 
 def webigv_named_track_url(request: Request, sample_run_id: str, output_key: str, outputs: dict) -> str:
-    relname = outputs.get(output_key) or inferred_webigv_index_relname(outputs, output_key) or output_key
+    relname = effective_output_relname(output_key, outputs) or inferred_webigv_index_relname(outputs, output_key) or output_key
     filename = Path(relname).name
     return str(
         request.url_for(
@@ -883,7 +907,7 @@ def build_webigv_browser_config(
     if locus:
         browser_config["locus"] = locus
 
-    if resolved_outputs.get("main_cram") and resolved_outputs.get("main_cram_index"):
+    if effective_output_relname("main_cram", resolved_outputs) and webigv_output_exists(config, sample_row, resolved_outputs, "main_cram_index"):
         browser_config["tracks"].append(
             {
                 "name": "Main CRAM",
@@ -899,7 +923,7 @@ def build_webigv_browser_config(
 
     for label, output_key in WEBIGV_VCF_TRACKS:
         index_key = f"{output_key}_index"
-        if resolved_outputs.get(output_key) and webigv_output_exists(config, sample_row, resolved_outputs, index_key):
+        if effective_output_relname(output_key, resolved_outputs) and webigv_output_exists(config, sample_row, resolved_outputs, index_key):
             browser_config["tracks"].append(
                 {
                     "name": label,
@@ -911,7 +935,7 @@ def build_webigv_browser_config(
             )
 
     for label, output_key, file_format in WEBIGV_ANNOTATION_TRACKS:
-        if resolved_outputs.get(output_key):
+        if effective_output_relname(output_key, resolved_outputs):
             browser_config["tracks"].append(
                 {
                     "name": label,
@@ -1391,6 +1415,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     async def bulk_fasta_clipboard_export(
         request: Request,
         sample_run_id: list[str] = Form(default=[]),
+        header_id: str | None = Form(default=None),
         csrf_token: str = Form(default=""),
     ):
         require_permission(request, PERMISSION_EXPORT_READ)
@@ -1400,8 +1425,11 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         sample_rows = load_sample_rows(config, sample_run_id)
         if not sample_rows:
             raise HTTPException(status_code=404, detail="No matching samples found")
+        header_id = header_id if isinstance(header_id, str) and header_id else "lid"
+        if header_id not in {"lid", "sample_id"}:
+            raise HTTPException(status_code=400, detail="Unsupported FASTA header identifier")
         return Response(
-            content=build_fasta_clipboard_content(config, sample_rows, "export_fasta"),
+            content=build_fasta_clipboard_content(config, sample_rows, "export_fasta", header_id),
             media_type="text/plain; charset=utf-8",
         )
 
@@ -1409,6 +1437,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     async def bulk_iupac_fasta_clipboard_export(
         request: Request,
         sample_run_id: list[str] = Form(default=[]),
+        header_id: str | None = Form(default=None),
         csrf_token: str = Form(default=""),
     ):
         require_permission(request, PERMISSION_EXPORT_READ)
@@ -1418,8 +1447,11 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         sample_rows = load_sample_rows(config, sample_run_id)
         if not sample_rows:
             raise HTTPException(status_code=404, detail="No matching samples found")
+        header_id = header_id if isinstance(header_id, str) and header_id else "lid"
+        if header_id not in {"lid", "sample_id"}:
+            raise HTTPException(status_code=400, detail="Unsupported FASTA header identifier")
         return Response(
-            content=build_fasta_clipboard_content(config, sample_rows, "export_iupac_fasta"),
+            content=build_fasta_clipboard_content(config, sample_rows, "export_iupac_fasta", header_id),
             media_type="text/plain; charset=utf-8",
         )
 
