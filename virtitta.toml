@@ -148,6 +148,11 @@ warn_over = 32
 danger_over = 36
 
 [[results_roots]]
+name = "hcv_results"
+linux_path = "/mnt/fs1/results_dev/virpipa/hcv"
+windows_path = "Q:/results_dev/virpipa/hcv"
+
+[[results_roots]]
 name = "hcv_test_results"
 linux_path = "/mnt/fs1/jonas/hcv/test_results"
 windows_path = "Q:/jonas/hcv/test_results"
