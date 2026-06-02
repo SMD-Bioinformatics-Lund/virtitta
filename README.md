@@ -51,6 +51,8 @@ Important settings:
   - optional local login system with role-based permissions; disabled by default
 - `results_roots`
   - one or more result roots that contain imported `virpipa` runs
+  - each root has a stable `name` stored in SQLite as `source_root_name`; `linux_path` is used by the server, and
+    `windows_path` is used for desktop IGV URLs
 - `igv.base_url`
   - usually `http://localhost:60151/load`
 - `webigv.enabled`

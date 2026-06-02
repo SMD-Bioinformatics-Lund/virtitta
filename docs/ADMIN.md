@@ -38,6 +38,39 @@ Important sections:
 
 Start from `virtitta.example.toml` for new deployments.
 
+## Result Roots And Stored Paths
+
+Each configured result root has three parts:
+
+```toml
+[[results_roots]]
+name = "hcv_test_results"
+linux_path = "/fs1/jonas/hcv/test_results"
+windows_path = "Q:/jonas/hcv/test_results"
+```
+
+- `name` is a stable logical label. Virtitta stores this in SQLite as `runs.source_root_name` and
+  `samples.source_root_name`.
+- `linux_path` is the server-side path Virtitta reads for import, downloads, webIGV, cache refresh, and clustering.
+- `windows_path` is used only when building desktop IGV URLs for clients that see the files through a Windows mapping.
+
+Sample rows also store `sample_results_relpath`, the path from the configured root to the directory containing that
+sample's QC summary. Runtime file paths are resolved as:
+
+```text
+<results_roots[source_root_name].linux_path>/<sample_results_relpath>/<output path from QC JSON>
+```
+
+Desktop IGV uses the same relative path but starts from `windows_path`.
+
+The import CLI chooses `source_root_name` by checking which configured `linux_path` contains `--run-dir`. If more than
+one root matches, the most specific root path wins. This allows old and new storage trees to coexist, for example one
+root for `/fs1/jonas/hcv/test_results` and another for `/access/hcv`.
+
+To move a whole result tree without changing relative paths, keep the same root `name` and update only `linux_path` and
+`windows_path` in `virtitta.toml`. If you also rename the root, existing SQLite rows must be reimported or updated from
+the old `source_root_name` to the new one.
+
 ## IGV Configuration
 
 Desktop IGV remains the preferred workflow for routine review:
