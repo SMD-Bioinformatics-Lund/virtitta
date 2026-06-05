@@ -84,12 +84,24 @@ def _first_present(mapping: dict, keys: tuple[str, ...]) -> object:
     return None
 
 
+def _run_name_without_run_number(run_name: str) -> str | None:
+    parts = run_name.split("_")
+    if len(parts) < 4 or not parts[0].isdigit():
+        return None
+    return f"{parts[0]}_{parts[1]}_{parts[-1]}"
+
+
 def _clarity_sample_info_candidates(config: Config, run_dir: Path) -> list[Path]:
     candidates = [
         run_dir / "pipeline_info" / "clarity_sample_info.json",
         run_dir / "clarity_sample_info.json",
     ]
     if config.imports.clarity_metadata_root is not None:
+        reduced_run_name = _run_name_without_run_number(run_dir.name)
+        if reduced_run_name is not None:
+            pattern = f"*_{reduced_run_name}.json"
+            matches = sorted(config.imports.clarity_metadata_root.glob(pattern))
+            candidates.extend(matches or [config.imports.clarity_metadata_root / pattern])
         candidates.append(config.imports.clarity_metadata_root / f"{run_dir.name}.clarity.json")
     return candidates
 
