@@ -46,7 +46,7 @@ sample_categories = ["production", "validation", "EQA"]
 lims_root = "data/lims_exports"
 
 [imports]
-clarity_metadata_root = ""
+clarity_metadata_root = "/fs2/seqdata/clarity"
 
 [cache]
 outputs_root = "data/output_cache"
