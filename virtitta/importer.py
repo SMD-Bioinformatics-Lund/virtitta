@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +12,12 @@ from virtitta.repository import connect, init_db, sync_run_sample_count, upsert_
 
 
 MANUAL_FAILED_RUN_NAME = "manual_failed_samples"
+
+
+@dataclass(frozen=True)
+class ImportReport:
+    imported: int
+    warnings: list[str]
 
 
 def _find_matching_root(path: Path, roots: list[ResultsRoot]) -> tuple[ResultsRoot, Path]:
@@ -77,10 +84,20 @@ def _first_present(mapping: dict, keys: tuple[str, ...]) -> object:
     return None
 
 
-def _default_clarity_sample_info_path(run_dir: Path) -> Path | None:
-    sample_info_path = run_dir / "clarity_sample_info.json"
-    if sample_info_path.is_file():
-        return sample_info_path
+def _clarity_sample_info_candidates(config: Config, run_dir: Path) -> list[Path]:
+    candidates = [
+        run_dir / "pipeline_info" / "clarity_sample_info.json",
+        run_dir / "clarity_sample_info.json",
+    ]
+    if config.imports.clarity_metadata_root is not None:
+        candidates.append(config.imports.clarity_metadata_root / f"{run_dir.name}.clarity.json")
+    return candidates
+
+
+def _default_clarity_sample_info_path(config: Config, run_dir: Path) -> Path | None:
+    for sample_info_path in _clarity_sample_info_candidates(config, run_dir):
+        if sample_info_path.is_file():
+            return sample_info_path
     return None
 
 
@@ -139,6 +156,85 @@ def _merge_clarity_sample_metadata(sample: dict, sample_info_by_id: dict[str, di
     merged_sample = dict(sample)
     merged_sample["sample_metadata"] = merged_metadata
     return merged_sample
+
+
+def _missing_metadata_fields(sample: dict) -> list[str]:
+    sample_metadata = sample.get("sample_metadata", {})
+    if not isinstance(sample_metadata, dict):
+        sample_metadata = {}
+
+    missing = []
+    if _maybe_float(_first_present(sample_metadata, ("ct", "CT"))) is None:
+        missing.append("CT")
+    if _maybe_float(
+        _first_present(
+            sample_metadata,
+            (
+                "library_concentration_ng_ul",
+                "Library concentration (ng/ul)",
+                "library_concentration",
+                "libconc",
+            ),
+        )
+    ) is None:
+        missing.append("library concentration")
+    if _maybe_int(
+        _first_present(
+            sample_metadata,
+            (
+                "library_fragment_length_bp",
+                "Library fragment length (bp)",
+                "library_fragment_length",
+                "libfrag",
+            ),
+        )
+    ) is None:
+        missing.append("library fragment length")
+    return missing
+
+
+def _format_sample_metadata_warnings(
+    *,
+    samples: list[dict],
+    sample_info_by_id: dict[str, dict[str, object]],
+    sample_info_path: Path | None,
+    checked_paths: list[Path],
+    run_name: str,
+) -> list[str]:
+    warnings: list[str] = []
+    missing_by_sample = {
+        str(sample.get("sample_id") or sample.get("sample_run_id") or "").strip(): _missing_metadata_fields(sample)
+        for sample in samples
+    }
+    missing_by_sample = {
+        sample_id: fields
+        for sample_id, fields in missing_by_sample.items()
+        if sample_id and fields
+    }
+    if not missing_by_sample:
+        return warnings
+
+    if sample_info_path is None:
+        checked = ", ".join(str(path) for path in checked_paths)
+        sample_list = ", ".join(sorted(missing_by_sample))
+        warnings.append(
+            f"No Clarity metadata file found for run {run_name}; missing metadata for {sample_list}. "
+            f"Checked: {checked}."
+        )
+        return warnings
+
+    source = str(sample_info_path)
+    for sample_id in sorted(missing_by_sample):
+        fields = ", ".join(missing_by_sample[sample_id])
+        if sample_id not in sample_info_by_id:
+            warnings.append(
+                f"No Clarity metadata entry for {sample_id} in {source}; missing {fields}."
+            )
+        else:
+            warnings.append(
+                f"Incomplete Clarity metadata for {sample_id} in {source}; missing {fields}."
+            )
+    return warnings
 
 
 def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpath: Path) -> dict:
@@ -284,29 +380,42 @@ def _manual_failed_sample_summary(
     }
 
 
-def import_run(config: Config, run_dir: Path, clarity_sample_info_path: Path | None = None) -> int:
+def import_run_with_report(
+    config: Config,
+    run_dir: Path,
+    clarity_sample_info_path: Path | None = None,
+) -> ImportReport:
     run_dir = run_dir.resolve()
     qc_summary_paths = _sample_qc_summary_paths(run_dir)
     if not qc_summary_paths:
         raise FileNotFoundError(f"Missing per-sample QC summary files under: {run_dir}")
 
     root, run_relpath = _find_matching_root(run_dir, config.results_roots)
-    sample_info_by_id = _load_clarity_sample_info(
-        clarity_sample_info_path or _default_clarity_sample_info_path(run_dir)
-    )
+    if clarity_sample_info_path is not None:
+        sample_info_path = clarity_sample_info_path
+        checked_paths = [clarity_sample_info_path]
+    else:
+        checked_paths = _clarity_sample_info_candidates(config, run_dir)
+        sample_info_path = _default_clarity_sample_info_path(config, run_dir)
+
+    sample_info_by_id = _load_clarity_sample_info(sample_info_path)
     records = [
         (_merge_clarity_sample_metadata(_load_sample_summary(path), sample_info_by_id), path)
         for path in qc_summary_paths
     ]
+    first, _ = records[0]
+    run_name = first.get("run_name") or run_dir.name
+    warnings = _format_sample_metadata_warnings(
+        samples=[sample for sample, _ in records],
+        sample_info_by_id=sample_info_by_id,
+        sample_info_path=sample_info_path,
+        checked_paths=checked_paths,
+        run_name=str(run_name),
+    )
 
     connection = connect(config.database.path)
     try:
         init_db(connection)
-        if not records:
-            return 0
-
-        first, _ = records[0]
-        run_name = first.get("run_name") or run_dir.name
         upsert_run(
             connection,
             {
@@ -339,9 +448,13 @@ def import_run(config: Config, run_dir: Path, clarity_sample_info_path: Path | N
 
         sync_run_sample_count(connection, run_name)
         connection.commit()
-        return imported
+        return ImportReport(imported=imported, warnings=warnings)
     finally:
         connection.close()
+
+
+def import_run(config: Config, run_dir: Path, clarity_sample_info_path: Path | None = None) -> int:
+    return import_run_with_report(config, run_dir, clarity_sample_info_path).imported
 
 
 def import_sample(
@@ -418,12 +531,19 @@ def import_sample(
         connection.close()
 
 
-def import_all_roots(config: Config) -> int:
+def import_all_roots_with_report(config: Config) -> ImportReport:
     total = 0
+    warnings: list[str] = []
     for root in config.results_roots:
         if not root.linux_path.exists():
             continue
         for run_dir in sorted(path for path in root.linux_path.iterdir() if path.is_dir()):
             if _sample_qc_summary_paths(run_dir):
-                total += import_run(config, run_dir)
-    return total
+                report = import_run_with_report(config, run_dir)
+                total += report.imported
+                warnings.extend(report.warnings)
+    return ImportReport(imported=total, warnings=warnings)
+
+
+def import_all_roots(config: Config) -> int:
+    return import_all_roots_with_report(config).imported

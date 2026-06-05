@@ -107,6 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def print_import_warnings(warnings: list[str]) -> None:
+    for warning in warnings:
+        print(f"Warning: {warning}")
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -115,7 +120,7 @@ def main() -> None:
     from virtitta.artifact_cache import CACHE_OK, cache_sample_outputs, verify_sample_cache
     from virtitta.auth import hash_password, normalize_username, validate_role
     from virtitta.config import load_config
-    from virtitta.importer import import_all_roots, import_run, import_sample
+    from virtitta.importer import import_all_roots_with_report, import_run_with_report, import_sample
     from virtitta.repository import (
         backfill_variant_af_counts,
         connect,
@@ -142,12 +147,13 @@ def main() -> None:
         return
 
     if args.command == "import-run":
-        imported = import_run(
+        report = import_run_with_report(
             config,
             Path(args.run_dir),
             Path(args.clarity_sample_info) if args.clarity_sample_info else None,
         )
-        print(f"Imported {imported} samples from {args.run_dir}")
+        print(f"Imported {report.imported} samples from {args.run_dir}")
+        print_import_warnings(report.warnings)
         return
 
     if args.command == "import-sample":
@@ -164,8 +170,9 @@ def main() -> None:
         return
 
     if args.command == "import-root":
-        imported = import_all_roots(config)
-        print(f"Imported {imported} samples from configured roots")
+        report = import_all_roots_with_report(config)
+        print(f"Imported {report.imported} samples from configured roots")
+        print_import_warnings(report.warnings)
         return
 
     if args.command == "backfill-af-counts":

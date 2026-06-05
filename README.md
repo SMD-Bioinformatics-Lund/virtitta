@@ -159,8 +159,9 @@ PYTHONPATH=$PWD python -m virtitta.cli import-run \
   --clarity-sample-info /path/to/clarity_sample_info.json
 ```
 
-When provided, Virtitta uses that file to fill missing `CT`, library concentration, and library fragment length
-values for matching `sample_id` entries. Values already present in the per-sample QC summaries are kept.
+Virtitta also checks run-local and configured fallback locations for Clarity metadata, and warns when imported samples
+still lack CT, library concentration, or library fragment length. See `docs/ADMIN.md` for the lookup order. Values
+already present in the per-sample QC summaries are kept.
 
 If a sample failed before `virpipa` produced any per-sample QC summary, add a sparse failed-sample row manually:
 

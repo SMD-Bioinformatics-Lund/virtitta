@@ -45,6 +45,9 @@ sample_categories = ["production", "validation", "EQA"]
 [exports]
 lims_root = "data/lims_exports"
 
+[imports]
+clarity_metadata_root = ""
+
 [cache]
 outputs_root = "data/output_cache"
 output_keys = ["main_fasta", "iupac_fasta", "display_rug_kde_plot"]

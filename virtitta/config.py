@@ -154,6 +154,11 @@ class ExportSettings:
 
 
 @dataclass(frozen=True)
+class ImportSettings:
+    clarity_metadata_root: Path | None = None
+
+
+@dataclass(frozen=True)
 class CacheSettings:
     outputs_root: Path
     output_keys: list[str] = field(default_factory=lambda: list(DEFAULT_CACHE_OUTPUT_KEYS))
@@ -198,6 +203,7 @@ class Config:
     features: FeatureSettings
     annotations: AnnotationSettings
     exports: ExportSettings
+    imports: ImportSettings
     cache: CacheSettings
     auth: AuthSettings
     ui: UiSettings
@@ -286,6 +292,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
     features_raw = raw.get("features", {})
     annotations_raw = raw.get("annotations", {})
     exports_raw = raw.get("exports", {})
+    imports_raw = raw.get("imports", {})
     cache_raw = raw.get("cache", {})
     auth_raw = raw.get("auth", {})
     ui_raw = raw.get("ui", {})
@@ -362,6 +369,16 @@ def load_config(config_path: str | Path | None = None) -> Config:
                 else Path(exports_raw["lims_root"]).resolve()
             )
             if exports_raw.get("lims_root")
+            else None
+        ),
+        imports=ImportSettings(
+            clarity_metadata_root=(
+                (base_dir / imports_raw["clarity_metadata_root"]).resolve()
+                if imports_raw.get("clarity_metadata_root")
+                and not Path(imports_raw["clarity_metadata_root"]).is_absolute()
+                else Path(imports_raw["clarity_metadata_root"]).resolve()
+            )
+            if imports_raw.get("clarity_metadata_root")
             else None
         ),
         cache=CacheSettings(

@@ -110,6 +110,7 @@ VIEWABLE_DETAIL_OUTPUT_KEYS = {
     "vadr_bed",
     "selected_vadr_gff",
 }
+DETAIL_VIEW_MEDIA_TYPE = "text/plain; charset=utf-8"
 
 IGV_TRACK_LINKS = [
     ("Genome FASTA", "main_fasta"),
@@ -950,7 +951,7 @@ def build_webigv_browser_config(
 
 def create_app(config_path: str | Path | None = None) -> FastAPI:
     config = load_config(config_path)
-    from virtitta.importer import import_run as import_run_dir
+    from virtitta.importer import import_run_with_report as import_run_dir
     connection = connect(config.database.path)
     try:
         init_db(connection)
@@ -1834,10 +1835,16 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             return FileResponse(
                 cached_path,
                 filename=outputs.get(output_key) or cached_path.name,
+                media_type=DETAIL_VIEW_MEDIA_TYPE,
                 content_disposition_type="inline",
             )
         file_path, relname = resolve_output_file(config, sample_row, output_key)
-        return FileResponse(file_path, filename=relname, content_disposition_type="inline")
+        return FileResponse(
+            file_path,
+            filename=relname,
+            media_type=DETAIL_VIEW_MEDIA_TYPE,
+            content_disposition_type="inline",
+        )
 
     @app.get("/samples/{sample_run_id}/webigv", response_class=HTMLResponse)
     def sample_webigv(request: Request, sample_run_id: str, locus: str = Query(default="")):
@@ -1922,14 +1929,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=500, detail=f"Configured results root not found: {run_row['source_root_name']}")
 
         run_dir = (root.linux_path / run_row["run_relpath"]).resolve()
-        imported = import_run_dir(config, run_dir)
-        return RedirectResponse(
-            append_notice(
-                request_url_without_messages(redirect_to),
-                f"Refreshed run metadata from per-sample QC summaries ({imported} samples).",
-            ),
-            status_code=303,
+        report = import_run_dir(config, run_dir)
+        redirect_url = append_notice(
+            request_url_without_messages(redirect_to),
+            f"Refreshed run metadata from per-sample QC summaries ({report.imported} samples).",
         )
+        if report.warnings:
+            redirect_url = append_warning(redirect_url, " ".join(report.warnings))
+        return RedirectResponse(redirect_url, status_code=303)
 
     @app.get("/samples/{sample_run_id}/lims-export")
     def sample_lims_export(request: Request, sample_run_id: str):

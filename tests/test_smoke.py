@@ -36,7 +36,7 @@ from virtitta.auth import create_login_session, hash_password
 from virtitta.cli import build_parser
 from virtitta.cluster import ClusterError, cluster_artifacts, prepare_cluster_files, run_cluster_job
 from virtitta.config import load_config
-from virtitta.importer import MANUAL_FAILED_RUN_NAME, import_run, import_sample
+from virtitta.importer import MANUAL_FAILED_RUN_NAME, import_run, import_run_with_report, import_sample
 from virtitta.repository import (
     add_comment,
     add_samples_to_group,
@@ -377,6 +377,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             "SAMPLE001-pilon-m0.3.vcf.gz.csi",
             "SAMPLE001-pilon-m0.4.vcf.gz",
             "SAMPLE001-pilon-m0.4.vcf.gz.csi",
+            "SAMPLE001-coverage.tsv",
             "SAMPLE001.vadr.bed",
             "SAMPLE001_resistance.gff",
             "SAMPLE001.vadr.pass_mod.gff",
@@ -781,6 +782,142 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(sample["sample_metadata_ct"], 24.8)
         self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 5.6)
         self.assertEqual(sample["sample_metadata_library_fragment_length_bp"], 387)
+
+    def test_import_run_uses_pipeline_info_clarity_sample_info_when_metadata_is_missing(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["sample_metadata"] = {}
+        self.write_run_summaries([fixture[0]])
+        pipeline_info_dir = self.run_dir / "pipeline_info"
+        pipeline_info_dir.mkdir()
+        (pipeline_info_dir / "clarity_sample_info.json").write_text(
+            json.dumps(
+                {
+                    "sample_1": {
+                        "clarity_sample_id": "SAMPLE001",
+                        "CT": 24.8,
+                        "Library concentration (ng/ul)": 5.6,
+                        "Library fragment length (bp)": 387,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        config = load_config(self.config_path)
+        report = import_run_with_report(config, self.run_dir)
+        self.assertEqual(report.imported, 1)
+        self.assertEqual(report.warnings, [])
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        self.assertEqual(sample["sample_metadata_ct"], 24.8)
+        self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 5.6)
+        self.assertEqual(sample["sample_metadata_library_fragment_length_bp"], 387)
+
+    def test_import_run_uses_configured_run_keyed_clarity_metadata(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["sample_metadata"] = {}
+        self.write_run_summaries([fixture[0]])
+        clarity_root = self.tmp_path / "clarity_metadata"
+        clarity_root.mkdir()
+        (clarity_root / "fixture_run.clarity.json").write_text(
+            json.dumps(
+                {
+                    "sample_1": {
+                        "clarity_sample_id": "SAMPLE001",
+                        "CT": 24.8,
+                        "Library concentration (ng/ul)": 5.6,
+                        "Library fragment length (bp)": 387,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.config_path.open("a", encoding="utf-8") as handle:
+            handle.write("\n[imports]\n")
+            handle.write(f'clarity_metadata_root = "{clarity_root.as_posix()}"\n')
+
+        config = load_config(self.config_path)
+        report = import_run_with_report(config, self.run_dir)
+        self.assertEqual(report.imported, 1)
+        self.assertEqual(report.warnings, [])
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        self.assertEqual(sample["sample_metadata_ct"], 24.8)
+        self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 5.6)
+        self.assertEqual(sample["sample_metadata_library_fragment_length_bp"], 387)
+
+    def test_import_run_reports_warning_when_clarity_metadata_file_is_missing(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["sample_metadata"] = {}
+        self.write_run_summaries([fixture[0]])
+
+        config = load_config(self.config_path)
+        report = import_run_with_report(config, self.run_dir)
+
+        self.assertEqual(report.imported, 1)
+        self.assertEqual(len(report.warnings), 1)
+        self.assertIn("No Clarity metadata file found for run fixture_run", report.warnings[0])
+        self.assertIn("SAMPLE001", report.warnings[0])
+        self.assertIn("pipeline_info/clarity_sample_info.json", report.warnings[0])
+
+    def test_import_run_reports_warning_when_clarity_entry_is_missing(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["sample_metadata"] = {}
+        self.write_run_summaries([fixture[0]])
+        clarity_path = self.write_clarity_sample_info(
+            {
+                "sample_1": {
+                    "clarity_sample_id": "OTHER_SAMPLE",
+                    "CT": 24.8,
+                    "Library concentration (ng/ul)": 5.6,
+                    "Library fragment length (bp)": 387,
+                }
+            }
+        )
+
+        config = load_config(self.config_path)
+        report = import_run_with_report(config, self.run_dir, clarity_path)
+
+        self.assertEqual(report.imported, 1)
+        self.assertEqual(len(report.warnings), 1)
+        self.assertIn("No Clarity metadata entry for SAMPLE001", report.warnings[0])
+        self.assertIn(str(clarity_path), report.warnings[0])
+
+    def test_import_run_reports_warning_when_clarity_entry_is_incomplete(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["sample_metadata"] = {}
+        self.write_run_summaries([fixture[0]])
+        clarity_path = self.write_clarity_sample_info(
+            {
+                "sample_1": {
+                    "clarity_sample_id": "SAMPLE001",
+                    "CT": "Undetermined",
+                    "Library concentration (ng/ul)": 5.6,
+                    "Library fragment length (bp)": "",
+                }
+            }
+        )
+
+        config = load_config(self.config_path)
+        report = import_run_with_report(config, self.run_dir, clarity_path)
+
+        self.assertEqual(report.imported, 1)
+        self.assertEqual(len(report.warnings), 1)
+        self.assertIn("Incomplete Clarity metadata for SAMPLE001", report.warnings[0])
+        self.assertIn("CT", report.warnings[0])
+        self.assertIn("library fragment length", report.warnings[0])
 
     def test_import_run_accepts_display_metadata_keys_from_qc_summary(self) -> None:
         fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
@@ -2530,6 +2667,23 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(Path(response.path).read_text(encoding="utf-8"), "placeholder")
         self.assertIn("inline", response.headers["content-disposition"])
         self.assertIn("SAMPLE001.fasta.blast", response.headers["content-disposition"])
+
+    def test_sample_file_view_serves_bed_and_tsv_as_inline_text(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/files/{output_key}/view")
+
+        for output_key, filename in [
+            ("vadr_bed", "SAMPLE001.vadr.bed"),
+            ("coverage_tsv", "SAMPLE001-coverage.tsv"),
+        ]:
+            response = route.endpoint(self.make_request(app), "SAMPLE001_fixture_run", output_key)
+
+            self.assertIn("text/plain", response.headers["content-type"])
+            self.assertIn("inline", response.headers["content-disposition"])
+            self.assertIn(filename, response.headers["content-disposition"])
 
     def test_sample_file_view_blocks_cram(self) -> None:
         config = load_config(self.config_path)
