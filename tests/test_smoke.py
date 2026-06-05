@@ -819,13 +819,32 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 5.6)
         self.assertEqual(sample["sample_metadata_library_fragment_length_bp"], 387)
 
-    def test_import_run_uses_configured_run_keyed_clarity_metadata(self) -> None:
+    def test_import_run_matches_configured_clarity_metadata_without_run_number(self) -> None:
+        run_name = "260601_A01932_0123_AHFNTGDMX2"
+        run_dir = self.root / run_name
+        sample_dir = run_dir / "SAMPLE001" / "results"
+        sample_dir.mkdir(parents=True)
         fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-        fixture[0]["sample_metadata"] = {}
-        self.write_run_summaries([fixture[0]])
+        sample_summary = fixture[0]
+        sample_summary["run_name"] = run_name
+        sample_summary["sample_run_id"] = f"SAMPLE001_{run_name}"
+        sample_summary["sample_metadata"] = {}
+        (sample_dir / "SAMPLE001_qc_summary.json").write_text(
+            json.dumps(sample_summary),
+            encoding="utf-8",
+        )
+        self.write_required_sidecar_outputs(sample_dir, "SAMPLE001")
+        (sample_dir / "SAMPLE001-0.15-iupac.fasta").write_text(
+            ">SAMPLE001-0.15-iupac\nACGT\n",
+            encoding="utf-8",
+        )
+        (sample_dir / "SAMPLE001_display_rug_kde_plot.png").write_text(
+            "placeholder",
+            encoding="utf-8",
+        )
         clarity_root = self.tmp_path / "clarity_metadata"
         clarity_root.mkdir()
-        (clarity_root / "fixture_run.clarity.json").write_text(
+        (clarity_root / "NovaSeqX_260601_A01932_AHFNTGDMX2.json").write_text(
             json.dumps(
                 {
                     "sample_1": {
@@ -843,13 +862,13 @@ class VirtittaSmokeTests(unittest.TestCase):
             handle.write(f'clarity_metadata_root = "{clarity_root.as_posix()}"\n')
 
         config = load_config(self.config_path)
-        report = import_run_with_report(config, self.run_dir)
+        report = import_run_with_report(config, run_dir)
         self.assertEqual(report.imported, 1)
         self.assertEqual(report.warnings, [])
 
         conn = connect(config.database.path)
         try:
-            sample = get_sample(conn, "SAMPLE001_fixture_run")
+            sample = get_sample(conn, f"SAMPLE001_{run_name}")
         finally:
             conn.close()
 
@@ -858,8 +877,8 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 5.6)
         self.assertEqual(sample["sample_metadata_library_fragment_length_bp"], 387)
 
-    def test_import_run_matches_configured_clarity_metadata_without_run_number(self) -> None:
-        run_name = "260601_A01932_0123_AHFNTGDMX2"
+    def test_import_run_matches_configured_clarity_metadata_for_last_concatenated_run(self) -> None:
+        run_name = "260531_A01932_0122_AHAAAAAA+260601_A01932_0123_AHFNTGDMX2"
         run_dir = self.root / run_name
         sample_dir = run_dir / "SAMPLE001" / "results"
         sample_dir.mkdir(parents=True)

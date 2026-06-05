@@ -201,7 +201,8 @@ metadata in this order:
 4. `<imports.clarity_metadata_root>/*_<YYMMDD>_<instrument>_<flowcell>.json`, when configured. This matches
    Clarity files such as `NovaSeqX_260601_A01932_AHFNTGDMX2.json` to a run directory such as
    `260601_A01932_0123_AHFNTGDMX2`, where the Clarity filename omits the instrument run number.
-5. `<imports.clarity_metadata_root>/<run_name>.clarity.json`, when configured
+   If the run directory name contains `+` because runs were concatenated, Virtitta matches the configured-root
+   Clarity file using the latest dated run segment only.
 
 Values already present in the QC summaries are kept. Missing or incomplete Clarity metadata does not block import, but
 the CLI and run-refresh action warn so the operator can locate the file and re-run the import.

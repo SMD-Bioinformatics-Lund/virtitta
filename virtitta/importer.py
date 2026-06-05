@@ -84,7 +84,18 @@ def _first_present(mapping: dict, keys: tuple[str, ...]) -> object:
     return None
 
 
+def _clarity_lookup_run_name(run_name: str) -> str:
+    candidates = [part.strip() for part in run_name.split("+") if part.strip()]
+    dated_candidates = [part for part in candidates if len(part) >= 6 and part[:6].isdigit()]
+    if dated_candidates:
+        return sorted(dated_candidates, key=lambda part: part[:6])[-1]
+    if candidates:
+        return candidates[-1]
+    return run_name
+
+
 def _run_name_without_run_number(run_name: str) -> str | None:
+    run_name = _clarity_lookup_run_name(run_name)
     parts = run_name.split("_")
     if len(parts) < 4 or not parts[0].isdigit():
         return None
@@ -102,7 +113,6 @@ def _clarity_sample_info_candidates(config: Config, run_dir: Path) -> list[Path]
             pattern = f"*_{reduced_run_name}.json"
             matches = sorted(config.imports.clarity_metadata_root.glob(pattern))
             candidates.extend(matches or [config.imports.clarity_metadata_root / pattern])
-        candidates.append(config.imports.clarity_metadata_root / f"{run_dir.name}.clarity.json")
     return candidates
 
 
