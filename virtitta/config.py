@@ -146,6 +146,7 @@ class FeatureSettings:
 @dataclass(frozen=True)
 class AnnotationSettings:
     sample_categories: list[str] = field(default_factory=list)
+    restricted_sample_categories: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -361,6 +362,9 @@ def load_config(config_path: str | Path | None = None) -> Config:
         ),
         annotations=AnnotationSettings(
             sample_categories=_normalize_string_list(annotations_raw.get("sample_categories", [])),
+            restricted_sample_categories=_normalize_string_list(
+                annotations_raw.get("restricted_sample_categories", [])
+            ),
         ),
         exports=ExportSettings(
             lims_root=(

@@ -34,9 +34,22 @@ Important sections:
 - `[auth]`: optional local login and session settings
 - `[webigv]`: optional browser IGV fallback settings
 - `[cluster]`: optional selected-sample clustering settings
+- `[annotations]`: assignable sample categories and optional restricted categories
 - `[ui]`: table columns, defaults, labels, width caps, and highlight rules
 
 Start from `virtitta.example.toml` for new deployments.
+
+Sample categories are configured in `[annotations]`:
+
+```toml
+[annotations]
+sample_categories = ["production", "validation", "EQA", "test"]
+restricted_sample_categories = ["test"]
+```
+
+Restricted categories are hidden from roles without category-update permission. With the default roles, `admin` and
+`reviewer` can see and assign `test`, while `commenter` and `viewer` do not see those samples in the table, detail
+pages, direct file/export routes, or category filters.
 
 ## Result Roots And Stored Paths
 

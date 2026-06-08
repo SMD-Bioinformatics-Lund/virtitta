@@ -641,6 +641,7 @@ def list_samples(
     min_mean_depth: float | None = None,
     min_blast_identity: float | None = None,
     max_ct: float | None = None,
+    excluded_sample_categories: list[str] | None = None,
     sort: str = "run_name",
     desc: bool = True,
 ) -> list[dict]:
@@ -699,6 +700,10 @@ def list_samples(
             category_clauses.append("a.sample_category IS NULL")
         if category_clauses:
             clauses.append("(" + " OR ".join(category_clauses) + ")")
+    if excluded_sample_categories:
+        placeholders = ",".join("?" for _ in excluded_sample_categories)
+        clauses.append(f"(a.sample_category IS NULL OR a.sample_category NOT IN ({placeholders}))")
+        params.extend(excluded_sample_categories)
     if manual_groups:
         placeholders = ",".join("?" for _ in manual_groups)
         clauses.append(

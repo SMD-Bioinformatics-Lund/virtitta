@@ -89,7 +89,8 @@ def write_test_config(config_path: Path, *, root: Path, db_path: Path) -> None:
                 "igv = true",
                 "",
                 "[annotations]",
-                'sample_categories = ["production", "validation", "EQA"]',
+                'sample_categories = ["production", "validation", "EQA", "test"]',
+                'restricted_sample_categories = ["test"]',
                 "",
                 "[[results_roots]]",
                 'name = "test"',
@@ -1348,7 +1349,8 @@ class VirtittaSmokeTests(unittest.TestCase):
 
     def test_load_config_reads_annotation_categories_and_default_category_column(self) -> None:
         config = load_config(self.config_path)
-        self.assertEqual(config.annotations.sample_categories, ["production", "validation", "EQA"])
+        self.assertEqual(config.annotations.sample_categories, ["production", "validation", "EQA", "test"])
+        self.assertEqual(config.annotations.restricted_sample_categories, ["test"])
         self.assertEqual(config.ui.column_labels["sequencing_date"], "Date")
         self.assertEqual(config.ui.column_labels["generated_date"], "Import Date")
         self.assertEqual(config.ui.column_labels["variant_af_count_005"], "af 0.05")
@@ -2856,6 +2858,99 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertNotIn("Mark pass", rendered)
         self.assertNotIn("Delete samples", rendered)
         self.assertNotIn("Add group", rendered)
+
+    def test_restricted_category_samples_are_hidden_from_viewer_table(self) -> None:
+        self.enable_auth()
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            set_sample_category(conn, ["SAMPLE001_fixture_run"], "test")
+        finally:
+            conn.close()
+        self.create_local_user("viewer", "viewer")
+        self.create_local_user("reviewer", "reviewer")
+        app = create_app(self.config_path)
+        _viewer_token, viewer = self.login_local_user("viewer")
+        _reviewer_token, reviewer = self.login_local_user("reviewer")
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
+
+        viewer_response = route.endpoint(
+            self.make_user_request(app, viewer),
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            sample_category=["test"],
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        )
+        reviewer_response = route.endpoint(
+            self.make_user_request(app, reviewer),
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        )
+
+        viewer_rendered = viewer_response.body.decode("utf-8")
+        reviewer_rendered = reviewer_response.body.decode("utf-8")
+        self.assertEqual(viewer_response.context["rows"], [])
+        self.assertNotIn('name="sample_category" value="test"', viewer_rendered)
+        self.assertNotIn("Set category: test", viewer_rendered)
+        self.assertEqual(len(reviewer_response.context["rows"]), 1)
+        self.assertIn('name="sample_category" value="test"', reviewer_rendered)
+        self.assertIn("Set category: test", reviewer_rendered)
+
+    def test_restricted_category_sample_detail_and_exports_are_hidden_from_viewer(self) -> None:
+        self.enable_auth()
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            set_sample_category(conn, ["SAMPLE001_fixture_run"], "test")
+        finally:
+            conn.close()
+        self.create_local_user("viewer", "viewer")
+        self.create_local_user("reviewer", "reviewer")
+        app = create_app(self.config_path)
+        _viewer_token, viewer = self.login_local_user("viewer")
+        _reviewer_token, reviewer = self.login_local_user("reviewer")
+        detail_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}")
+        fasta_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/clipboard/fasta")
+
+        with self.assertRaises(HTTPException) as detail_error:
+            detail_route.endpoint(
+                self.make_user_request(app, viewer, path="/samples/SAMPLE001_fixture_run"),
+                "SAMPLE001_fixture_run",
+            )
+        self.assertEqual(detail_error.exception.status_code, 404)
+        reviewer_response = detail_route.endpoint(
+            self.make_user_request(app, reviewer, path="/samples/SAMPLE001_fixture_run"),
+            "SAMPLE001_fixture_run",
+        )
+        self.assertEqual(reviewer_response.status_code, 200)
+
+        with self.assertRaises(HTTPException) as export_error:
+            asyncio.run(
+                fasta_route.endpoint(
+                    self.make_user_request(app, viewer, path="/samples/clipboard/fasta", method="POST"),
+                    sample_run_id=["SAMPLE001_fixture_run"],
+                    header_id="lid",
+                    csrf_token=viewer.csrf_token,
+                )
+            )
+        self.assertEqual(export_error.exception.status_code, 404)
 
     def test_reviewer_qc_update_requires_csrf_and_records_authenticated_author(self) -> None:
         self.enable_auth()

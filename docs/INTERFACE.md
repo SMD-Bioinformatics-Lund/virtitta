@@ -47,6 +47,10 @@ QC and category actions ask for confirmation when more than one sample is select
 confirmation and only removes records from Virtitta, not result files on disk. Category actions use the configured
 sample category list directly.
 
+Restricted sample categories are hidden from users below reviewer. When a category such as `test` is configured as
+restricted, only `admin` and `reviewer` users see those samples, category filter values, and category assignment
+actions.
+
 ## Clustering
 
 When clustering is enabled, `Cluster` opens actions for the selected samples. `Cluster selected` starts a background job

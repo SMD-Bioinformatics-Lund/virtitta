@@ -279,6 +279,33 @@ def configured_category_options(config: Config, stored_categories: list[str], se
     return options
 
 
+def restricted_sample_categories(config: Config, request: Request) -> list[str]:
+    if not config.auth.enabled:
+        return []
+    current_user = getattr(request.state, "current_user", None)
+    if current_user is not None and current_user.can(PERMISSION_CATEGORY_UPDATE):
+        return []
+    return list(config.annotations.restricted_sample_categories)
+
+
+def visible_category_options(config: Config, request: Request, categories: list[str]) -> list[str]:
+    restricted = set(restricted_sample_categories(config, request))
+    if not restricted:
+        return categories
+    return [category for category in categories if category not in restricted]
+
+
+def sample_visible_to_request(config: Config, request: Request, sample_row: dict) -> bool:
+    category = sample_row.get("sample_category")
+    return not category or category not in restricted_sample_categories(config, request)
+
+
+def require_visible_sample(config: Config, request: Request, sample_row: dict | None) -> dict:
+    if sample_row is None or not sample_visible_to_request(config, request, sample_row):
+        raise HTTPException(status_code=404, detail="Sample not found")
+    return sample_row
+
+
 def bool_query_value(value: bool) -> str:
     return "true" if value else "false"
 
@@ -633,13 +660,13 @@ def build_lims_export_content(config: Config, sample_rows: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def load_sample_rows(config: Config, sample_run_ids: list[str]) -> list[dict]:
+def load_sample_rows(config: Config, sample_run_ids: list[str], request: Request | None = None) -> list[dict]:
     connection = connect(config.database.path)
     try:
         sample_rows = []
         for item in sample_run_ids:
             sample_row = get_sample(connection, item)
-            if sample_row is not None:
+            if sample_row is not None and (request is None or sample_visible_to_request(config, request, sample_row)):
                 sample_rows.append(sample_row)
     finally:
         connection.close()
@@ -1086,6 +1113,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     ):
         require_permission(request, PERMISSION_VIEW)
         selected_sample_categories = unique_strings(sample_category)
+        selected_sample_categories = visible_category_options(config, request, selected_sample_categories)
         selected_manual_groups = unique_strings(manual_group)
         min_coverage_value = parse_optional_float(min_coverage_pct)
         min_mean_depth_value = parse_optional_float(min_mean_depth)
@@ -1108,6 +1136,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 min_mean_depth=min_mean_depth_value,
                 min_blast_identity=min_blast_identity_value,
                 max_ct=max_ct_value,
+                excluded_sample_categories=restricted_sample_categories(config, request),
                 sort=sort,
                 desc=desc,
             )
@@ -1123,6 +1152,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             stored_sample_categories,
             selected_sample_categories,
         )
+        available_sample_categories = visible_category_options(config, request, available_sample_categories)
 
         for row in rows:
             raw = raw_json_for_sample(row)
@@ -1360,7 +1390,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if not sample_run_id:
             return RedirectResponse(redirect_to, status_code=303)
 
-        sample_rows = load_sample_rows(config, sample_run_id)
+        sample_rows = load_sample_rows(config, sample_run_id, request)
 
         if not sample_rows:
             raise HTTPException(status_code=404, detail="No matching samples found")
@@ -1394,7 +1424,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if not sample_run_id:
             return RedirectResponse(redirect_to, status_code=303)
 
-        sample_rows = load_sample_rows(config, sample_run_id)
+        sample_rows = load_sample_rows(config, sample_run_id, request)
 
         if not sample_rows:
             raise HTTPException(status_code=404, detail="No matching samples found")
@@ -1423,7 +1453,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         require_csrf(request, csrf_token)
         if not sample_run_id:
             raise HTTPException(status_code=400, detail="No samples selected")
-        sample_rows = load_sample_rows(config, sample_run_id)
+        sample_rows = load_sample_rows(config, sample_run_id, request)
         if not sample_rows:
             raise HTTPException(status_code=404, detail="No matching samples found")
         header_id = header_id if isinstance(header_id, str) and header_id else "lid"
@@ -1445,7 +1475,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         require_csrf(request, csrf_token)
         if not sample_run_id:
             raise HTTPException(status_code=400, detail="No samples selected")
-        sample_rows = load_sample_rows(config, sample_run_id)
+        sample_rows = load_sample_rows(config, sample_run_id, request)
         if not sample_rows:
             raise HTTPException(status_code=404, detail="No matching samples found")
         header_id = header_id if isinstance(header_id, str) and header_id else "lid"
@@ -1478,7 +1508,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             )
 
         job_id = secrets.token_urlsafe(12)
-        sample_rows = load_sample_rows(config, sample_run_id)
+        sample_rows = load_sample_rows(config, sample_run_id, request)
         if len(sample_rows) < 2:
             raise HTTPException(status_code=404, detail="No matching samples found")
 
@@ -1625,8 +1655,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            sample_row = require_visible_sample(config, request, sample_row)
             comments = get_comments(connection, sample_run_id)
             raw = raw_json_for_sample(sample_row)
         finally:
@@ -1717,8 +1746,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            require_visible_sample(config, request, sample_row)
             current_user = getattr(request.state, "current_user", None)
             actor = current_user.display_name if config.auth.enabled and current_user is not None else None
             changes = set_sample_field_overrides(connection, sample_run_id, values, updated_by=actor)
@@ -1744,10 +1772,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     ):
         require_permission(request, PERMISSION_COMMENT_ADD)
         require_csrf(request, csrf_token)
-        if not body.strip():
-            return RedirectResponse(f"/samples/{sample_run_id}", status_code=303)
         connection = connect(config.database.path)
         try:
+            sample_row = get_sample(connection, sample_run_id)
+            require_visible_sample(config, request, sample_row)
+            if not body.strip():
+                return RedirectResponse(f"/samples/{sample_run_id}", status_code=303)
             current_user = getattr(request.state, "current_user", None)
             actor = current_user.display_name if config.auth.enabled and current_user is not None else None
             add_comment(connection, sample_run_id, body, actor or author or None)
@@ -1767,8 +1797,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            require_visible_sample(config, request, sample_row)
             delete_comment(connection, sample_run_id, comment_id)
         finally:
             connection.close()
@@ -1785,8 +1814,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            sample_row = require_visible_sample(config, request, sample_row)
             run_name = sample_row["run_name"]
             delete_samples(connection, [sample_run_id])
         finally:
@@ -1800,8 +1828,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            sample_row = require_visible_sample(config, request, sample_row)
             if is_cacheable_output(config, output_key):
                 cached_path = get_cached_output_file(config, connection, sample_run_id, output_key)
         finally:
@@ -1823,8 +1850,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            sample_row = require_visible_sample(config, request, sample_row)
             if is_cacheable_output(config, output_key):
                 cached_path = get_cached_output_file(config, connection, sample_run_id, output_key)
         finally:
@@ -1852,8 +1878,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            sample_row = require_visible_sample(config, request, sample_row)
             raw = raw_json_for_sample(sample_row)
         finally:
             connection.close()
@@ -1898,8 +1923,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            sample_row = require_visible_sample(config, request, sample_row)
         finally:
             connection.close()
 
@@ -1944,8 +1968,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            sample_row = require_visible_sample(config, request, sample_row)
         finally:
             connection.close()
 
@@ -1979,8 +2002,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            sample_row = require_visible_sample(config, request, sample_row)
         finally:
             connection.close()
 
@@ -2007,8 +2029,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            sample_row = require_visible_sample(config, request, sample_row)
         finally:
             connection.close()
 
@@ -2020,8 +2041,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
-            if sample_row is None:
-                raise HTTPException(status_code=404, detail="Sample not found")
+            sample_row = require_visible_sample(config, request, sample_row)
         finally:
             connection.close()
 

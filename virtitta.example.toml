@@ -40,7 +40,8 @@ bulk_qc = true
 igv = true
 
 [annotations]
-sample_categories = ["production", "validation", "EQA"]
+sample_categories = ["production", "validation", "EQA", "test"]
+restricted_sample_categories = ["test"]
 
 [exports]
 lims_root = "data/lims_exports"
