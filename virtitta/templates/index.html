@@ -259,7 +259,7 @@
               <a class="{% if row.get('lid_overridden') %}overridden-value{% endif %}" href="{{ request.url_for('sample_detail', sample_run_id=row['sample_run_id']) }}" {% if row.get('lid_overridden') %}title="Imported: {{ format_value(row.get('imported_lid')) }}"{% endif %}>{{ display_identifier(row) }}</a>
               {% elif column == 'sample_category' %}
               {% if value %}
-              <span title="{{ value }}">{{ "Prod" if value == "production" else value[:3] if value == value.upper() else value[:3]|capitalize }}</span>
+              <span title="{{ value }}">{{ "Prod" if value == "production" else "Test" if value == "test" else value[:3] if value == value.upper() else value[:3]|capitalize }}</span>
               {% endif %}
               {% elif column == 'resistance_summary' %}
               <div class="resistance-summary-cell" title="{{ row['resistance_summary_tooltip'] }}">

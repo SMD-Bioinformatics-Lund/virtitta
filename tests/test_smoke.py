@@ -2911,6 +2911,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(len(reviewer_response.context["rows"]), 1)
         self.assertIn('name="sample_category" value="test"', reviewer_rendered)
         self.assertIn("Set category: test", reviewer_rendered)
+        self.assertIn('title="test">Test</span>', reviewer_rendered)
 
     def test_restricted_category_sample_detail_and_exports_are_hidden_from_viewer(self) -> None:
         self.enable_auth()
