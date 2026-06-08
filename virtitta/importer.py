@@ -278,7 +278,7 @@ def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpa
         "lid": sample.get("lid"),
         "source_root_name": root_name,
         "sample_results_relpath": sample_results_relpath.as_posix(),
-        "typing_report_subtype": typing.get("report_subtype"),
+        "typing_report_subtype": typing.get("main_blast_genotype"),
         "typing_main_blast_identity": typing.get("main_blast_identity"),
         "host_filter_reads_in": host_filter.get("reads_in"),
         "host_filter_reads_removed_proportion": host_filter.get("reads_removed_proportion"),

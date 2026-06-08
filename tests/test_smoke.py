@@ -225,6 +225,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         sample["sample_id"] = "SAMPLE002"
         sample["sample_run_id"] = "SAMPLE002_fixture_run"
         sample["lid"] = lid
+        sample["typing"]["main_blast_genotype"] = subtype
         sample["typing"]["report_subtype"] = subtype
         sample["outputs"] = dict(sample["outputs"])
         for key, value in list(sample["outputs"].items()):
@@ -1046,6 +1047,26 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertNotEqual(raw["sample_metadata"]["ct"], 99.1)
         self.assertNotEqual(raw["sample_metadata"]["library_concentration_ng_ul"], 88.8)
         self.assertNotEqual(raw["sample_metadata"]["library_fragment_length_bp"], 777)
+
+    def test_import_run_uses_main_blast_genotype_as_subtype(self) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        fixture[0]["typing"]["main_blast_genotype"] = "2i"
+        fixture[0]["typing"]["report_subtype"] = "2a"
+        self.write_run_summaries([fixture[0]])
+
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+            rows = list_samples(conn, subtype="2i")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(sample)
+        self.assertEqual(sample["typing_report_subtype"], "2i")
+        self.assertEqual([row["sample_run_id"] for row in rows], ["SAMPLE001_fixture_run"])
 
     def test_sample_field_overrides_survive_reimport_without_changing_imported_values(self) -> None:
         config = load_config(self.config_path)

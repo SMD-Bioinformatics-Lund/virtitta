@@ -10,7 +10,7 @@ Key behavior:
 
 - `LID` is the main visible sample identifier when available.
 - Leading columns stay sticky during horizontal scrolling.
-- Table filters apply by run, subtype, QC state, categories, manual groups, and numeric thresholds.
+- Table filters apply by run, subtype, QC state, categories, manual groups, and numeric thresholds. The displayed subtype is imported from the VirPipa BLAST top-hit genotype (`typing.main_blast_genotype`).
 - The text search field filters the currently loaded table client-side.
 - Column visibility can be changed from the `Columns` panel.
 - Native browser hover tooltips show full values for truncated table cells and comments.
