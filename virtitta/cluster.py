@@ -445,6 +445,16 @@ def write_command_snapshot(config: Config, output_relpath: str) -> None:
     path.write_text(json.dumps(command_config_snapshot(config), indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _command_output_tail(output: str, *, max_lines: int = 6, max_chars: int = 1200) -> str:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    tail = " | ".join(lines[-max_lines:])
+    if len(tail) > max_chars:
+        tail = "..." + tail[-max_chars:]
+    return tail
+
+
 def _run_command(argv: list[str], *, cwd: Path, timeout_seconds: int, stdout_path: Path | None, log_handle) -> None:
     log_handle.write(f"$ {' '.join(argv)}\n")
     stdout_target = subprocess.PIPE if stdout_path is None else stdout_path.open("wb")
@@ -466,10 +476,18 @@ def _run_command(argv: list[str], *, cwd: Path, timeout_seconds: int, stdout_pat
             stdout_target.close()
 
     if stdout_path is None:
-        log_handle.write(result.stdout.decode("utf-8", errors="replace"))
-    log_handle.write(result.stderr.decode("utf-8", errors="replace"))
+        stdout_text = result.stdout.decode("utf-8", errors="replace")
+        log_handle.write(stdout_text)
+    else:
+        stdout_text = ""
+    stderr_text = result.stderr.decode("utf-8", errors="replace")
+    log_handle.write(stderr_text)
     if result.returncode != 0:
-        raise ClusterError(f"Command failed with exit code {result.returncode}: {argv[0]}")
+        error_text = f"Command failed with exit code {result.returncode}: {argv[0]}"
+        output_tail = _command_output_tail(stdout_text + stderr_text)
+        if output_tail:
+            error_text = f"{error_text}. Recent output: {output_tail}"
+        raise ClusterError(error_text)
 
 
 def run_cluster_job(config: Config, job_id: str) -> None:

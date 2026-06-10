@@ -62,6 +62,8 @@ contains `ID` plus the configured main-table columns and comment count. Complete
 FASTA, prepared FASTA, alignment, Newick tree, metadata, command snapshot, and log. Artifact links open inline in the
 browser, and the Newick tree and metadata can also be copied to the clipboard. If browser clipboard access is blocked,
 the artifact content is shown in a selected text box for manual copy.
+If MAFFT or IQ-TREE fails, the failure text includes recent command output; the full tool output remains available in
+the job's `cluster.log` artifact.
 
 If a GrapeTree URL is configured, completed jobs show `Open GrapeTree`. The link passes a tokenized GrapeTree JSON
 payload containing the generated Newick tree and metadata table to the configured standalone GrapeTree instance.

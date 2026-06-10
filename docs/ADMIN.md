@@ -142,6 +142,10 @@ iqtree_threads = 4
 iqtree_args = []
 ```
 
+For service users or `micromamba run` deployments, keep `mafft_command` and `iqtree_command` as command names when the
+runtime environment reliably adds the tool directory to `PATH`. Use absolute paths only in host-specific configs where
+the service account cannot otherwise resolve the tools.
+
 For the local conda workflow, install the command-line tools into the same environment that runs Virtitta:
 
 ```bash

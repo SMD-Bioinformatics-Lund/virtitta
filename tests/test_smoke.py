@@ -2252,6 +2252,63 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("poly-T event: LID002 19 -> 3 (-16 bases, fuzzy-seed)", log_text)
         self.assertIn("-T 4", log_text)
 
+    def test_run_cluster_job_records_recent_command_output_on_failure(self) -> None:
+        mafft, iqtree = self.write_fake_cluster_tools()
+        iqtree.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "print('iqtree detail line 1', file=sys.stderr)\n"
+            "print('iqtree detail line 2', file=sys.stderr)\n"
+            "raise SystemExit(2)\n",
+            encoding="utf-8",
+        )
+        self.enable_cluster(
+            mafft_command=mafft.as_posix(),
+            iqtree_command=iqtree.as_posix(),
+            five_prime_trim=0,
+        )
+        self.add_second_sample_summary(subtype="3a", sequence="ACGT")
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            rows = [
+                get_sample(conn, "SAMPLE001_fixture_run"),
+                get_sample(conn, "SAMPLE002_fixture_run"),
+            ]
+            sample_records, warning_text = prepare_cluster_files(config, conn, rows, "job1")
+            create_cluster_job(
+                conn,
+                {
+                    "id": "job1",
+                    "status": "queued",
+                    "created_at": utc_now(),
+                    "started_at": None,
+                    "completed_at": None,
+                    "selected_count": 2,
+                    "warning_text": warning_text,
+                    "error_text": None,
+                    "output_relpath": "job1",
+                    "artifacts_json": json.dumps(cluster_artifacts("job1"), sort_keys=True),
+                    "config_json": "{}",
+                    "public_token": "public-token",
+                },
+                sample_records,
+            )
+        finally:
+            conn.close()
+
+        run_cluster_job(config, "job1")
+
+        conn = connect(config.database.path)
+        try:
+            job = get_cluster_job(conn, "job1")
+        finally:
+            conn.close()
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("Command failed with exit code 2", job["error_text"])
+        self.assertIn("Recent output: iqtree detail line 1 | iqtree detail line 2", job["error_text"])
+
     def test_cluster_routes_are_registered_and_grapetree_url_uses_public_artifacts(self) -> None:
         self.enable_cluster()
         config = load_config(self.config_path)
