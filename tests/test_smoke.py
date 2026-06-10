@@ -213,6 +213,49 @@ class VirtittaSmokeTests(unittest.TestCase):
                 "iqtree_args = []\n"
             )
 
+    def add_sample_summary(
+        self,
+        *,
+        sample_id: str,
+        subtype: str = "1a",
+        lid: str,
+        tree_id: str,
+        sequence: str = "ACGTAAAA",
+    ) -> None:
+        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))[0]
+        sample = json.loads(json.dumps(fixture))
+        sample["sample_id"] = sample_id
+        sample["sample_run_id"] = f"{sample_id}_fixture_run"
+        sample["lid"] = lid
+        sample["typing"]["main_blast_genotype"] = subtype
+        sample["typing"]["report_subtype"] = subtype
+        sample["outputs"] = dict(sample["outputs"])
+        for key, value in list(sample["outputs"].items()):
+            if isinstance(value, str):
+                sample["outputs"][key] = value.replace("SAMPLE001", sample_id).replace("LID001", lid)
+        sample["outputs"]["export_iupac_fasta"] = f"lid/{lid}-0.15-iupac.fasta"
+        self.write_sample_summary(sample)
+        sample_dir = self.run_dir / sample_id / "results"
+        for filename in [
+            f"{sample_id}_rug_kde_plot.png",
+            f"{sample_id}.vadr.bed",
+            f"{sample_id}_resistance.gff",
+            f"{sample_id}.vadr.pass_mod.gff",
+            f"{sample_id}.fasta.blast",
+        ]:
+            (sample_dir / filename).write_text("placeholder", encoding="utf-8")
+        self.write_required_sidecar_outputs(sample_dir, sample_id)
+        (sample_dir / f"{sample_id}-0.15-iupac.fasta").write_text(
+            f">{tree_id}\n{sequence}\n",
+            encoding="utf-8",
+        )
+        sample_lid_dir = sample_dir / "lid"
+        sample_lid_dir.mkdir(parents=True, exist_ok=True)
+        (sample_lid_dir / f"{lid}-0.15-iupac.fasta").write_text(
+            f">{tree_id}\n{sequence}\n",
+            encoding="utf-8",
+        )
+
     def add_second_sample_summary(
         self,
         *,
@@ -221,53 +264,12 @@ class VirtittaSmokeTests(unittest.TestCase):
         tree_id: str = "LID002-0.15-iupac",
         sequence: str = "ACGTAAAA",
     ) -> None:
-        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))[0]
-        sample = json.loads(json.dumps(fixture))
-        sample["sample_id"] = "SAMPLE002"
-        sample["sample_run_id"] = "SAMPLE002_fixture_run"
-        sample["lid"] = lid
-        sample["typing"]["main_blast_genotype"] = subtype
-        sample["typing"]["report_subtype"] = subtype
-        sample["outputs"] = dict(sample["outputs"])
-        for key, value in list(sample["outputs"].items()):
-            if isinstance(value, str):
-                sample["outputs"][key] = value.replace("SAMPLE001", "SAMPLE002").replace("LID001", lid)
-        sample["outputs"]["export_iupac_fasta"] = f"lid/{lid}-0.15-iupac.fasta"
-        self.write_sample_summary(sample)
-        sample2_dir = self.run_dir / "SAMPLE002" / "results"
-        for filename in [
-            "SAMPLE002_rug_kde_plot.png",
-            "SAMPLE002.fasta",
-            "SAMPLE002.fasta.fai",
-            "SAMPLE002.cram",
-            "SAMPLE002.cram.crai",
-            "SAMPLE002-pilon-m0.05.vcf.gz",
-            "SAMPLE002-pilon-m0.05.vcf.gz.csi",
-            "SAMPLE002-pilon-m0.1.vcf.gz",
-            "SAMPLE002-pilon-m0.1.vcf.gz.csi",
-            "SAMPLE002-pilon-m0.15.vcf.gz",
-            "SAMPLE002-pilon-m0.15.vcf.gz.csi",
-            "SAMPLE002-pilon-m0.2.vcf.gz",
-            "SAMPLE002-pilon-m0.2.vcf.gz.csi",
-            "SAMPLE002-pilon-m0.3.vcf.gz",
-            "SAMPLE002-pilon-m0.3.vcf.gz.csi",
-            "SAMPLE002-pilon-m0.4.vcf.gz",
-            "SAMPLE002-pilon-m0.4.vcf.gz.csi",
-            "SAMPLE002.vadr.bed",
-            "SAMPLE002_resistance.gff",
-            "SAMPLE002.vadr.pass_mod.gff",
-            "SAMPLE002.fasta.blast",
-        ]:
-            (sample2_dir / filename).write_text("placeholder", encoding="utf-8")
-        (sample2_dir / "SAMPLE002-0.15-iupac.fasta").write_text(
-            f">{tree_id}\n{sequence}\n",
-            encoding="utf-8",
-        )
-        sample2_lid_dir = self.run_dir / "SAMPLE002" / "results" / "lid"
-        sample2_lid_dir.mkdir(parents=True, exist_ok=True)
-        (sample2_lid_dir / f"{lid}-0.15-iupac.fasta").write_text(
-            f">{tree_id}\n{sequence}\n",
-            encoding="utf-8",
+        self.add_sample_summary(
+            sample_id="SAMPLE002",
+            subtype=subtype,
+            lid=lid,
+            tree_id=tree_id,
+            sequence=sequence,
         )
 
     def write_fake_cluster_tools(self) -> tuple[Path, Path]:
@@ -285,7 +287,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             "#!/usr/bin/env python3\n"
             "import pathlib, sys\n"
             "prefix = pathlib.Path(sys.argv[sys.argv.index('-pre') + 1])\n"
-            "prefix.with_suffix('.treefile').write_text('(LID001:0.1,LID002:0.1);\\n')\n",
+            "prefix.with_suffix('.treefile').write_text('(LID001:0.1,LID002:0.1,LID003:0.1);\\n')\n",
             encoding="utf-8",
         )
         for tool in (mafft, iqtree):
@@ -2062,6 +2064,35 @@ class VirtittaSmokeTests(unittest.TestCase):
     def test_prepare_cluster_files_strips_header_suffix_and_writes_metadata(self) -> None:
         self.enable_cluster()
         self.add_second_sample_summary(subtype="1a")
+        self.add_sample_summary(sample_id="SAMPLE003", subtype="1a", lid="LID003", tree_id="LID003-0.15-iupac")
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            rows = [
+                get_sample(conn, "SAMPLE001_fixture_run"),
+                get_sample(conn, "SAMPLE002_fixture_run"),
+                get_sample(conn, "SAMPLE003_fixture_run"),
+            ]
+            sample_records, warning_text = prepare_cluster_files(config, conn, rows, "job1")
+        finally:
+            conn.close()
+
+        self.assertEqual([record["tree_id"] for record in sample_records], ["LID001", "LID002", "LID003"])
+        self.assertIn("multiple subtypes", warning_text)
+        prepared_input = (config.cluster.output_root / "job1" / "input.raw.fasta").read_text(encoding="utf-8")
+        metadata = (config.cluster.output_root / "job1" / "metadata.tsv").read_text(encoding="utf-8")
+        self.assertIn(">LID001\nARYT\n", prepared_input)
+        self.assertIn(">LID002\nACGTAAAA\n", prepared_input)
+        self.assertIn(">LID003\nACGTAAAA\n", prepared_input)
+        self.assertIn("ID\tlid\tsample_id\tsequencing_date\tgenerated_date\tsample_category\tqc_status\tmanual_groups", metadata)
+        self.assertIn("typing_report_subtype\ttyping_main_blast_identity\tresistance_summary", metadata)
+        self.assertIn("comment_count", metadata)
+        self.assertIn("LID002\tLID002\tSAMPLE002\t2026-04-08\t2026-04-08\t\tunreviewed\t\t1a", metadata)
+
+    def test_prepare_cluster_files_requires_three_samples(self) -> None:
+        self.enable_cluster()
+        self.add_second_sample_summary(subtype="1a")
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
         conn = connect(config.database.path)
@@ -2070,24 +2101,15 @@ class VirtittaSmokeTests(unittest.TestCase):
                 get_sample(conn, "SAMPLE001_fixture_run"),
                 get_sample(conn, "SAMPLE002_fixture_run"),
             ]
-            sample_records, warning_text = prepare_cluster_files(config, conn, rows, "job1")
+            with self.assertRaisesRegex(ClusterError, "Select at least 3 samples"):
+                prepare_cluster_files(config, conn, rows, "job1")
         finally:
             conn.close()
-
-        self.assertEqual([record["tree_id"] for record in sample_records], ["LID001", "LID002"])
-        self.assertIn("multiple subtypes", warning_text)
-        prepared_input = (config.cluster.output_root / "job1" / "input.raw.fasta").read_text(encoding="utf-8")
-        metadata = (config.cluster.output_root / "job1" / "metadata.tsv").read_text(encoding="utf-8")
-        self.assertIn(">LID001\nARYT\n", prepared_input)
-        self.assertIn(">LID002\nACGTAAAA\n", prepared_input)
-        self.assertIn("ID\tlid\tsample_id\tsequencing_date\tgenerated_date\tsample_category\tqc_status\tmanual_groups", metadata)
-        self.assertIn("typing_report_subtype\ttyping_main_blast_identity\tresistance_summary", metadata)
-        self.assertIn("comment_count", metadata)
-        self.assertIn("LID002\tLID002\tSAMPLE002\t2026-04-08\t2026-04-08\t\tunreviewed\t\t1a", metadata)
 
     def test_prepare_cluster_files_blocks_duplicate_metadata_tree_ids(self) -> None:
         self.enable_cluster()
         self.add_second_sample_summary(lid="LID001", tree_id="LID002-0.15-iupac")
+        self.add_sample_summary(sample_id="SAMPLE003", subtype="1a", lid="LID003", tree_id="LID003-0.15-iupac")
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
         conn = connect(config.database.path)
@@ -2095,6 +2117,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             rows = [
                 get_sample(conn, "SAMPLE001_fixture_run"),
                 get_sample(conn, "SAMPLE002_fixture_run"),
+                get_sample(conn, "SAMPLE003_fixture_run"),
             ]
             with self.assertRaisesRegex(ClusterError, "Duplicate FASTA tree ID"):
                 prepare_cluster_files(config, conn, rows, "job1")
@@ -2103,6 +2126,7 @@ class VirtittaSmokeTests(unittest.TestCase):
 
     def test_prepare_cluster_files_can_suffix_duplicate_tree_ids_with_run_name(self) -> None:
         self.enable_cluster()
+        self.add_sample_summary(sample_id="SAMPLE003", subtype="1a", lid="LID003", tree_id="LID003-0.15-iupac")
         second_run_dir = self.root / "fixture_run_2"
         fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))[0]
         sample = json.loads(json.dumps(fixture))
@@ -2159,6 +2183,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             rows = [
                 get_sample(conn, "SAMPLE001_fixture_run"),
                 get_sample(conn, "SAMPLE002_fixture_run_2"),
+                get_sample(conn, "SAMPLE003_fixture_run"),
             ]
             sample_records, warning_text = prepare_cluster_files(
                 config,
@@ -2172,13 +2197,14 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertEqual(
             [record["tree_id"] for record in sample_records],
-            ["LID001-fixture_run", "LID001-fixture_run_2"],
+            ["LID001-fixture_run", "LID001-fixture_run_2", "LID003"],
         )
         self.assertIn("renamed with run name suffixes: LID001", warning_text)
         prepared_input = (config.cluster.output_root / "job1" / "input.raw.fasta").read_text(encoding="utf-8")
         metadata = (config.cluster.output_root / "job1" / "metadata.tsv").read_text(encoding="utf-8")
         self.assertIn(">LID001-fixture_run\nARYT\n", prepared_input)
         self.assertIn(">LID001-fixture_run_2\nACGTAAAA\n", prepared_input)
+        self.assertIn(">LID003\nACGTAAAA\n", prepared_input)
         self.assertIn("LID001-fixture_run_2\tLID001\tSAMPLE002", metadata)
 
     def test_run_cluster_job_uses_configured_tools_and_completes(self) -> None:
@@ -2189,6 +2215,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             five_prime_trim=0,
         )
         self.add_second_sample_summary(subtype="3a", sequence="ACGTTTTTCTTTTTTACGT")
+        self.add_sample_summary(sample_id="SAMPLE003", subtype="3a", lid="LID003", tree_id="LID003-0.15-iupac")
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
         conn = connect(config.database.path)
@@ -2196,6 +2223,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             rows = [
                 get_sample(conn, "SAMPLE001_fixture_run"),
                 get_sample(conn, "SAMPLE002_fixture_run"),
+                get_sample(conn, "SAMPLE003_fixture_run"),
             ]
             sample_records, warning_text = prepare_cluster_files(config, conn, rows, "job1")
             create_cluster_job(
@@ -2229,27 +2257,28 @@ class VirtittaSmokeTests(unittest.TestCase):
             conn.close()
         self.assertEqual(job["status"], "completed")
         self.assertEqual(job["error_text"], None)
-        self.assertEqual([sample["tree_id"] for sample in samples], ["LID001", "LID002"])
+        self.assertEqual([sample["tree_id"] for sample in samples], ["LID001", "LID002", "LID003"])
         self.assertEqual(
             (config.cluster.output_root / "job1" / "iqtree.treefile").read_text(encoding="utf-8"),
-            "(LID001:0.1,LID002:0.1);\n",
+            "(LID001:0.1,LID002:0.1,LID003:0.1);\n",
         )
         self.assertIn(">LID002\nACG\n", (config.cluster.output_root / "job1" / "aligned.fasta").read_text(encoding="utf-8"))
         grapetree = json.loads((config.cluster.output_root / "job1" / "grapetree.json").read_text(encoding="utf-8"))
-        self.assertEqual(grapetree["nwk"], "(LID001:0.1,LID002:0.1);")
+        self.assertEqual(grapetree["nwk"], "(LID001:0.1,LID002:0.1,LID003:0.1);")
         self.assertEqual(grapetree["layout_algorithm"], "greedy")
-        self.assertEqual(sorted(grapetree["metadata"]), ["LID001", "LID002"])
+        self.assertEqual(sorted(grapetree["metadata"]), ["LID001", "LID002", "LID003"])
         self.assertIn("sample_category", grapetree["metadata_options"])
         log_text = (config.cluster.output_root / "job1" / "cluster.log").read_text(encoding="utf-8")
         self.assertIn("--poly-t-min-length 10", log_text)
         self.assertIn("--poly-t-seed-length 12", log_text)
         self.assertIn("--poly-t-seed-min-t 10", log_text)
         self.assertIn("prepare-fasta summary:", log_text)
-        self.assertIn("records: 2", log_text)
+        self.assertIn("records: 3", log_text)
         self.assertIn("five-prime trim: disabled, 0 records, 0 bases", log_text)
-        self.assertIn("poly-T trim: enabled, 1/2 records, 16 bases (0 exact-run, 1 fuzzy-seed)", log_text)
+        self.assertIn("poly-T trim: enabled, 1/3 records, 16 bases (0 exact-run, 1 fuzzy-seed)", log_text)
         self.assertIn("poly-T trim lengths: min=16, median=16, max=16", log_text)
         self.assertIn("poly-T event: LID002 19 -> 3 (-16 bases, fuzzy-seed)", log_text)
+        self.assertIn("[virtitta] command exit_code=0", log_text)
         self.assertIn("-T 4", log_text)
 
     def test_run_cluster_job_records_recent_command_output_on_failure(self) -> None:
@@ -2268,6 +2297,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             five_prime_trim=0,
         )
         self.add_second_sample_summary(subtype="3a", sequence="ACGT")
+        self.add_sample_summary(sample_id="SAMPLE003", subtype="3a", lid="LID003", tree_id="LID003-0.15-iupac")
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
         conn = connect(config.database.path)
@@ -2275,6 +2305,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             rows = [
                 get_sample(conn, "SAMPLE001_fixture_run"),
                 get_sample(conn, "SAMPLE002_fixture_run"),
+                get_sample(conn, "SAMPLE003_fixture_run"),
             ]
             sample_records, warning_text = prepare_cluster_files(config, conn, rows, "job1")
             create_cluster_job(

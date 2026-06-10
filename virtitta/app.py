@@ -36,6 +36,7 @@ from virtitta.auth import (
 from virtitta.cluster import (
     ARTIFACT_GRAPETREE_JSON,
     CLUSTER_ARTIFACT_ALIASES,
+    MIN_CLUSTER_SAMPLES,
     PUBLIC_CLUSTER_ARTIFACTS,
     ClusterError,
     artifact_path,
@@ -1501,16 +1502,19 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 append_warning(redirect_to, "Cluster analysis is disabled."),
                 status_code=303,
             )
-        if len(sample_run_id) < 2:
+        if len(sample_run_id) < MIN_CLUSTER_SAMPLES:
             return RedirectResponse(
-                append_warning(redirect_to, "Select at least two samples for clustering."),
+                append_warning(redirect_to, f"Select at least {MIN_CLUSTER_SAMPLES} samples for clustering."),
                 status_code=303,
             )
 
         job_id = secrets.token_urlsafe(12)
         sample_rows = load_sample_rows(config, sample_run_id, request)
-        if len(sample_rows) < 2:
-            raise HTTPException(status_code=404, detail="No matching samples found")
+        if len(sample_rows) < MIN_CLUSTER_SAMPLES:
+            return RedirectResponse(
+                append_warning(redirect_to, f"Select at least {MIN_CLUSTER_SAMPLES} visible samples for clustering."),
+                status_code=303,
+            )
 
         connection = connect(config.database.path)
         try:

@@ -55,15 +55,15 @@ actions.
 
 When clustering is enabled, `Cluster` opens actions for the selected samples. `Cluster selected` starts a background job
 and keeps duplicate FASTA tree IDs as a blocking warning. `Cluster selected (allow duplicates)` allows duplicated
-normalized FASTA IDs by renaming those duplicated IDs to `<ID>-<run_name>`. At least two samples are required.
+normalized FASTA IDs by renaming those duplicated IDs to `<ID>-<run_name>`. At least three samples are required.
 
 The cluster detail page shows job status, warnings, selected sample IDs, and generated artifacts. The metadata file
 contains `ID` plus the configured main-table columns and comment count. Completed jobs expose downloads for the raw
 FASTA, prepared FASTA, alignment, Newick tree, metadata, command snapshot, and log. Artifact links open inline in the
 browser, and the Newick tree and metadata can also be copied to the clipboard. If browser clipboard access is blocked,
 the artifact content is shown in a selected text box for manual copy.
-If MAFFT or IQ-TREE fails, the failure text includes recent command output; the full tool output remains available in
-the job's `cluster.log` artifact.
+If MAFFT or IQ-TREE fails, the failure text includes recent command output; command exit codes, elapsed time, and full
+tool output remain available in the job's `cluster.log` artifact.
 
 If a GrapeTree URL is configured, completed jobs show `Open GrapeTree`. The link passes a tokenized GrapeTree JSON
 payload containing the generated Newick tree and metadata table to the configured standalone GrapeTree instance.

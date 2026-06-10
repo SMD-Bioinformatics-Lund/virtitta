@@ -152,13 +152,15 @@ For the local conda workflow, install the command-line tools into the same envir
 micromamba install -c conda-forge -c bioconda mafft iqtree
 ```
 
-V1 uses the imported `iupac_fasta` output for each selected sample, derives tree IDs from Virtitta sample metadata,
-trims the configured number of 5' bases, trims a poly-T tail only when at most `poly_t_max_trailing_bases` follow the
-T-rich seed. Exact T runs of at least `poly_t_min_length` are trimmed, and fuzzy tails are trimmed when a
-`poly_t_seed_length` window contains at least `poly_t_seed_min_t` T bases. The prepared FASTA is aligned with MAFFT, then
-IQ-TREE 3 runs with `-T` set from `cluster.iqtree_threads`. Cluster artifacts are written under `cluster.output_root`;
+V1 requires at least three selected samples, uses the imported `iupac_fasta` output for each selected sample, derives
+tree IDs from Virtitta sample metadata, trims the configured number of 5' bases, trims a poly-T tail only when at most
+`poly_t_max_trailing_bases` follow the T-rich seed. Exact T runs of at least `poly_t_min_length` are trimmed, and fuzzy
+tails are trimmed when a `poly_t_seed_length` window contains at least `poly_t_seed_min_t` T bases. The prepared FASTA
+is aligned with MAFFT, then IQ-TREE 3 runs with `-T` set from `cluster.iqtree_threads`. Cluster artifacts are written
+under `cluster.output_root`;
 queued or running jobs are marked failed on server restart. `cluster.log` includes a `prepare-fasta summary` showing
-whether 5' and poly-T trimming ran, how many records and bases were trimmed, and one line per poly-T trim event.
+whether 5' and poly-T trimming ran, how many records and bases were trimmed, one line per poly-T trim event, and
+external command exit codes and elapsed times.
 
 The GrapeTree handoff uses a `tree=` URL parameter with a tokenized public link to `grapetree.json`. That JSON embeds
 the completed Newick tree and metadata table, avoiding the stricter separate metadata URL loader in some GrapeTree

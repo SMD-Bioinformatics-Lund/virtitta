@@ -5,6 +5,7 @@ import io
 import json
 import re
 import subprocess
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -30,6 +31,7 @@ ARTIFACT_GRAPETREE_JSON = "grapetree_json"
 ARTIFACT_COMMANDS = "commands"
 ARTIFACT_LOG = "log"
 PUBLIC_CLUSTER_ARTIFACTS = {ARTIFACT_TREE, ARTIFACT_METADATA, ARTIFACT_GRAPETREE_JSON}
+MIN_CLUSTER_SAMPLES = 3
 CLUSTER_ARTIFACT_ALIASES = {
     "treefile.nwk": ARTIFACT_TREE,
     "treefile.newick": ARTIFACT_TREE,
@@ -322,8 +324,8 @@ def prepare_cluster_files(
     *,
     allow_duplicate_ids: bool = False,
 ) -> tuple[list[dict], str]:
-    if len(sample_rows) < 2:
-        raise ClusterError("Select at least two samples for clustering")
+    if len(sample_rows) < MIN_CLUSTER_SAMPLES:
+        raise ClusterError(f"Select at least {MIN_CLUSTER_SAMPLES} samples for clustering")
 
     output_dir = cluster_output_dir(config, output_relpath)
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -458,6 +460,7 @@ def _command_output_tail(output: str, *, max_lines: int = 6, max_chars: int = 12
 def _run_command(argv: list[str], *, cwd: Path, timeout_seconds: int, stdout_path: Path | None, log_handle) -> None:
     log_handle.write(f"$ {' '.join(argv)}\n")
     stdout_target = subprocess.PIPE if stdout_path is None else stdout_path.open("wb")
+    started = time.monotonic()
     try:
         result = subprocess.run(
             argv,
@@ -482,6 +485,8 @@ def _run_command(argv: list[str], *, cwd: Path, timeout_seconds: int, stdout_pat
         stdout_text = ""
     stderr_text = result.stderr.decode("utf-8", errors="replace")
     log_handle.write(stderr_text)
+    elapsed_seconds = time.monotonic() - started
+    log_handle.write(f"[virtitta] command exit_code={result.returncode} elapsed_seconds={elapsed_seconds:.3f}\n")
     if result.returncode != 0:
         error_text = f"Command failed with exit code {result.returncode}: {argv[0]}"
         output_tail = _command_output_tail(stdout_text + stderr_text)
