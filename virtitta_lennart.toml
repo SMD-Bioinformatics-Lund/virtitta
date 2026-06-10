@@ -153,8 +153,13 @@ danger_over = 36
 
 [[results_roots]]
 name = "hcv_results"
-linux_path = "/fs1/results_dev/virpipa/hcv"
-windows_path = "Q:/results_dev/virpipa/hcv"
+linux_path = "/fs1/results/virpipa/hcv"
+windows_path = "Q:/results/virpipa/hcv"
+
+# [[results_roots]]
+# name = "hcv_dev_results"
+# linux_path = "/fs1/results_dev/virpipa/hcv"
+# windows_path = "Q:/results_dev/virpipa/hcv"
 
 # [[results_roots]]
 # name = "hcv_test_results"
