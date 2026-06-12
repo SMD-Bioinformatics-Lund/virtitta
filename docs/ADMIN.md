@@ -338,7 +338,7 @@ Disabling a user clears active sessions for that user.
 
 - `admin`: all actions, including deletes, metadata overrides, run refresh, and CLI user administration
 - `reviewer`: QC, categories, groups, comments, read exports, and server-side LIMS export
-- `commenter`: view, read exports, and add comments
+- `commenter`: view, groups, read exports, and add comments
 - `viewer`: view and read exports only
 
 ## Deployment Notes

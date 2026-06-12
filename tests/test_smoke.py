@@ -3164,6 +3164,73 @@ class VirtittaSmokeTests(unittest.TestCase):
             )
         self.assertEqual(getattr(blocked_delete.exception, "status_code", None), 403)
 
+    def test_commenter_can_add_and_remove_manual_groups(self) -> None:
+        self.enable_auth()
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        self.create_local_user("commenter", "commenter")
+        app = create_app(self.config_path)
+        _token, user = self.login_local_user("commenter")
+        index_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
+        add_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/groups/add")
+        remove_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/groups/remove")
+
+        page = index_route.endpoint(
+            self.make_user_request(app, user),
+            search="",
+            run_name="",
+            subtype="",
+            qc_status="",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        )
+        rendered = page.body.decode("utf-8")
+        self.assertIn("Add group", rendered)
+        self.assertNotIn("Set category:", rendered)
+        token = re.search(r'name="csrf_token" value="([^"]+)"', rendered)
+        self.assertIsNotNone(token)
+        assert token is not None
+
+        response = asyncio.run(
+            add_route.endpoint(
+                self.make_user_request(app, user, method="POST"),
+                sample_run_id=["SAMPLE001_fixture_run"],
+                group_name="outbreak-19",
+                redirect_to="/",
+                csrf_token=token.group(1),
+            )
+        )
+        self.assertEqual(response.status_code, 303)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+        self.assertEqual(sample["manual_groups"], "outbreak-19")
+
+        response = asyncio.run(
+            remove_route.endpoint(
+                self.make_user_request(app, user, method="POST"),
+                sample_run_id=["SAMPLE001_fixture_run"],
+                group_name="outbreak-19",
+                redirect_to="/",
+                csrf_token=token.group(1),
+            )
+        )
+        self.assertEqual(response.status_code, 303)
+
+        conn = connect(config.database.path)
+        try:
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+        self.assertIsNone(sample["manual_groups"])
+
     def test_verify_cache_detects_stale_remote_output(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)

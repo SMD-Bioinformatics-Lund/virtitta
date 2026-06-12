@@ -240,7 +240,7 @@ Roles:
 
 - `admin`: all actions, including deletes, metadata overrides, run refresh, and user management through the CLI
 - `reviewer`: QC, categories, groups, comments, read exports, and server-side LIMS export
-- `commenter`: view, read exports, and add comments
+- `commenter`: view, groups, read exports, and add comments
 - `viewer`: view and read exports only
 
 When authentication is enabled, all write forms use CSRF tokens and comments/QC updates use the logged-in user name.

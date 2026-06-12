@@ -163,7 +163,7 @@ Roles:
 
 - `admin`: all actions
 - `reviewer`: QC, categories, groups, comments, read exports, and server-side LIMS export
-- `commenter`: view, read exports, and add comments
+- `commenter`: view, groups, read exports, and add comments
 - `viewer`: view and read exports only
 
 Routes are still protected server-side even when controls are hidden.
