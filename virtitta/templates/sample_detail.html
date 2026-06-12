@@ -161,7 +161,7 @@
       <article class="comment">
         <div class="comment-head">
           <div class="comment-meta">{{ comment["created_at"] }}{% if comment["author"] %} · {{ comment["author"] }}{% endif %}</div>
-          {% if permissions.comment_delete %}
+          {% if can_delete_comment(comment) %}
           <form method="post" action="{{ request.url_for('remove_comment', sample_run_id=sample['sample_run_id'], comment_id=comment['id']) }}" onsubmit="return confirm('Delete this comment?')" class="inline-form">
             {% if config.auth.enabled %}<input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">{% endif %}
             <button type="submit" class="mini-action secondary">Delete</button>

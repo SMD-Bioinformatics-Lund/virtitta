@@ -150,8 +150,8 @@ Comments are shown newest first.
 With authentication enabled:
 
 - new comments use the logged-in user name
-- `commenter` users can add comments but cannot delete comments
-- comment deletion requires admin permission
+- `reviewer` and `commenter` users can delete their own comments
+- deleting another user's comment requires admin permission
 
 With authentication disabled, forms may show optional author fields.
 
@@ -162,8 +162,8 @@ When authentication is enabled, unavailable controls are hidden.
 Roles:
 
 - `admin`: all actions
-- `reviewer`: QC, categories, groups, comments, read exports, and server-side LIMS export
-- `commenter`: view, groups, read exports, and add comments
+- `reviewer`: QC, categories, groups, comments, own comment deletion, read exports, and server-side LIMS export
+- `commenter`: view, groups, read exports, add comments, and delete own comments
 - `viewer`: view and read exports only
 
 Routes are still protected server-side even when controls are hidden.

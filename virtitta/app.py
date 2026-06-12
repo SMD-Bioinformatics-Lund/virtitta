@@ -27,6 +27,8 @@ from virtitta.auth import (
     PERMISSION_RUN_REFRESH,
     PERMISSION_SAMPLE_DELETE,
     PERMISSION_VIEW,
+    ROLE_COMMENTER,
+    ROLE_REVIEWER,
     authenticate_local_user,
     create_login_session,
     disabled_auth_user,
@@ -1018,6 +1020,16 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if not csrf_token or not secrets.compare_digest(csrf_token, current_user.csrf_token):
             raise HTTPException(status_code=403, detail="Invalid CSRF token")
 
+    def can_delete_comment(request: Request, comment: dict) -> bool:
+        if permission_allowed(request, PERMISSION_COMMENT_DELETE):
+            return True
+        current_user = getattr(request.state, "current_user", None)
+        if current_user is None or not current_user.authenticated:
+            return False
+        if current_user.role not in {ROLE_REVIEWER, ROLE_COMMENTER}:
+            return False
+        return bool(comment.get("author")) and comment.get("author") == current_user.display_name
+
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
         if not config.auth.enabled:
@@ -1700,6 +1712,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "resistance_has_calls": bool(resistance_summary.get("has_resistance")),
                 "warning_message": warning if isinstance(warning, str) else "",
                 "notice_message": notice if isinstance(notice, str) else "",
+                "can_delete_comment": lambda comment: can_delete_comment(request, comment),
                 "permissions": {
                     "comment_add": permission_allowed(request, PERMISSION_COMMENT_ADD),
                     "comment_delete": permission_allowed(request, PERMISSION_COMMENT_DELETE),
@@ -1796,12 +1809,19 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         comment_id: int,
         csrf_token: str = Form(default=""),
     ):
-        require_permission(request, PERMISSION_COMMENT_DELETE)
         require_csrf(request, csrf_token)
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
             require_visible_sample(config, request, sample_row)
+            comment = next(
+                (comment for comment in get_comments(connection, sample_run_id) if comment["id"] == comment_id),
+                None,
+            )
+            if comment is None:
+                raise HTTPException(status_code=404, detail="Comment not found")
+            if not can_delete_comment(request, comment):
+                raise HTTPException(status_code=403, detail="Forbidden")
             delete_comment(connection, sample_run_id, comment_id)
         finally:
             connection.close()

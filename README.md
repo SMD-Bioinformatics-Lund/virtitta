@@ -239,8 +239,8 @@ PYTHONPATH=$PWD python -m virtitta.cli list-users --config virtitta.toml
 Roles:
 
 - `admin`: all actions, including deletes, metadata overrides, run refresh, and user management through the CLI
-- `reviewer`: QC, categories, groups, comments, read exports, and server-side LIMS export
-- `commenter`: view, groups, read exports, and add comments
+- `reviewer`: QC, categories, groups, comments, own comment deletion, read exports, and server-side LIMS export
+- `commenter`: view, groups, read exports, add comments, and delete own comments
 - `viewer`: view and read exports only
 
 When authentication is enabled, all write forms use CSRF tokens and comments/QC updates use the logged-in user name.

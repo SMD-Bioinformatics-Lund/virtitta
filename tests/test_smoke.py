@@ -3088,7 +3088,10 @@ class VirtittaSmokeTests(unittest.TestCase):
             )
         self.assertEqual(getattr(blocked.exception, "status_code", None), 403)
 
-        page = detail_route.endpoint(self.make_user_request(app, user, path="/samples/SAMPLE001_fixture_run"), "SAMPLE001_fixture_run")
+        page = detail_route.endpoint(
+            self.make_user_request(app, user, path="/samples/SAMPLE001_fixture_run"),
+            "SAMPLE001_fixture_run",
+        )
         token = re.search(r'name="csrf_token" value="([^"]+)"', page.body.decode("utf-8"))
         self.assertIsNotNone(token)
         assert token is not None
@@ -3114,10 +3117,15 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(sample["qc_status"], "fail")
         self.assertEqual(comments[0]["author"], "reviewer")
 
-    def test_commenter_can_add_but_not_delete_comments(self) -> None:
+    def test_commenter_can_add_and_delete_own_comments_only(self) -> None:
         self.enable_auth()
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            add_comment(conn, "SAMPLE001_fixture_run", "Other note", "other-user")
+        finally:
+            conn.close()
         self.create_local_user("commenter", "commenter")
         app = create_app(self.config_path)
         _token, user = self.login_local_user("commenter")
@@ -3129,7 +3137,10 @@ class VirtittaSmokeTests(unittest.TestCase):
             if getattr(route, "path", None) == "/samples/{sample_run_id}/comments/{comment_id}/delete"
         )
 
-        page = detail_route.endpoint(self.make_user_request(app, user, path="/samples/SAMPLE001_fixture_run"), "SAMPLE001_fixture_run")
+        page = detail_route.endpoint(
+            self.make_user_request(app, user, path="/samples/SAMPLE001_fixture_run"),
+            "SAMPLE001_fixture_run",
+        )
         rendered = page.body.decode("utf-8")
         self.assertIn("Add comment", rendered)
         self.assertNotIn("Delete</button>", rendered)
@@ -3149,20 +3160,100 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         conn = connect(config.database.path)
         try:
-            comment = get_comments(conn, "SAMPLE001_fixture_run")[0]
+            comments = get_comments(conn, "SAMPLE001_fixture_run")
         finally:
             conn.close()
+        comments_by_body = {comment["body"]: comment for comment in comments}
+        self.assertEqual(comments_by_body["Looks useful"]["author"], "commenter")
+
+        page = detail_route.endpoint(self.make_user_request(app, user, path="/samples/SAMPLE001_fixture_run"), "SAMPLE001_fixture_run")
+        self.assertEqual(page.body.decode("utf-8").count("Delete</button>"), 1)
 
         with self.assertRaises(Exception) as blocked_delete:
             asyncio.run(
                 delete_route.endpoint(
                     self.make_user_request(app, user, method="POST"),
                     "SAMPLE001_fixture_run",
-                    comment["id"],
+                    comments_by_body["Other note"]["id"],
                     csrf_token=token.group(1),
                 )
             )
         self.assertEqual(getattr(blocked_delete.exception, "status_code", None), 403)
+
+        response = asyncio.run(
+            delete_route.endpoint(
+                self.make_user_request(app, user, method="POST"),
+                "SAMPLE001_fixture_run",
+                comments_by_body["Looks useful"]["id"],
+                csrf_token=token.group(1),
+            )
+        )
+        self.assertEqual(response.status_code, 303)
+
+        conn = connect(config.database.path)
+        try:
+            remaining_bodies = {comment["body"] for comment in get_comments(conn, "SAMPLE001_fixture_run")}
+        finally:
+            conn.close()
+        self.assertEqual(remaining_bodies, {"Other note"})
+
+    def test_reviewer_can_delete_own_comments_only(self) -> None:
+        self.enable_auth()
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            add_comment(conn, "SAMPLE001_fixture_run", "Reviewer note", "reviewer")
+            add_comment(conn, "SAMPLE001_fixture_run", "Other note", "other-user")
+            comments = get_comments(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+        comments_by_body = {comment["body"]: comment for comment in comments}
+
+        self.create_local_user("reviewer", "reviewer")
+        app = create_app(self.config_path)
+        _token, user = self.login_local_user("reviewer")
+        detail_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}")
+        delete_route = next(
+            route
+            for route in app.router.routes
+            if getattr(route, "path", None) == "/samples/{sample_run_id}/comments/{comment_id}/delete"
+        )
+
+        page = detail_route.endpoint(self.make_user_request(app, user, path="/samples/SAMPLE001_fixture_run"), "SAMPLE001_fixture_run")
+        rendered = page.body.decode("utf-8")
+        self.assertEqual(rendered.count("Delete</button>"), 1)
+        token = re.search(r'name="csrf_token" value="([^"]+)"', rendered)
+        self.assertIsNotNone(token)
+        assert token is not None
+
+        with self.assertRaises(Exception) as blocked_delete:
+            asyncio.run(
+                delete_route.endpoint(
+                    self.make_user_request(app, user, method="POST"),
+                    "SAMPLE001_fixture_run",
+                    comments_by_body["Other note"]["id"],
+                    csrf_token=token.group(1),
+                )
+            )
+        self.assertEqual(getattr(blocked_delete.exception, "status_code", None), 403)
+
+        response = asyncio.run(
+            delete_route.endpoint(
+                self.make_user_request(app, user, method="POST"),
+                "SAMPLE001_fixture_run",
+                comments_by_body["Reviewer note"]["id"],
+                csrf_token=token.group(1),
+            )
+        )
+        self.assertEqual(response.status_code, 303)
+
+        conn = connect(config.database.path)
+        try:
+            remaining_bodies = {comment["body"] for comment in get_comments(conn, "SAMPLE001_fixture_run")}
+        finally:
+            conn.close()
+        self.assertEqual(remaining_bodies, {"Other note"})
 
     def test_commenter_can_add_and_remove_manual_groups(self) -> None:
         self.enable_auth()
