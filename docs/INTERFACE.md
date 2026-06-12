@@ -12,7 +12,9 @@ Key behavior:
 - Leading columns stay sticky during horizontal scrolling.
 - Table filters apply by run, subtype, QC state, categories, manual groups, and numeric thresholds. The displayed subtype is imported from the VirPipa BLAST top-hit genotype (`typing.main_blast_genotype`).
 - The text search field filters the currently loaded table client-side.
-- Column visibility can be changed from the `Columns` panel.
+- Column visibility can be changed from the `Columns` panel. `Classification` is shown by default when imported from
+  Clarity metadata; `Department`, `Sequencing Runs`, and `Sample Submission Signing` are available as optional columns
+  and on the sample detail page.
 - Native browser hover tooltips show full values for truncated table cells and comments.
 
 ## Selection
@@ -102,6 +104,7 @@ Status and warning messages appear as compact header toasts. They do not move th
 The detail page shows:
 
 - imported summary values
+- imported Clarity metadata values when available
 - current QC state
 - comments
 - rug/KDE image when available

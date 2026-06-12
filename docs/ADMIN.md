@@ -211,8 +211,8 @@ python -m virtitta.cli import-run \
   --clarity-sample-info /path/to/clarity_sample_info.json
 ```
 
-When QC summaries are missing CT, library concentration, or library fragment length, `import-run` looks for Clarity
-metadata in this order:
+When QC summaries are missing CT, library concentration, library fragment length, department, classification,
+sequencing runs, or sample submission signing, `import-run` looks for Clarity metadata in this order:
 
 1. `--clarity-sample-info /path/to/clarity_sample_info.json`
 2. `<run_dir>/pipeline_info/clarity_sample_info.json`
@@ -223,8 +223,8 @@ metadata in this order:
    If the run directory name contains `+` because runs were concatenated, Virtitta matches the configured-root
    Clarity file using the latest dated run segment only.
 
-Values already present in the QC summaries are kept. Missing or incomplete Clarity metadata does not block import, but
-the CLI and run-refresh action warn so the operator can locate the file and re-run the import.
+Values already present in the QC summaries are kept. Missing or incomplete numeric Clarity metadata does not block
+import, but the CLI and run-refresh action warn so the operator can locate the file and re-run the import.
 
 Import all runs under configured result roots:
 

@@ -68,6 +68,7 @@ table_columns = [
   "sequencing_date",
   "generated_date",
   "sample_category",
+  "sample_metadata_classification",
   "qc_status",
   "manual_groups",
   "typing_report_subtype",
@@ -90,6 +91,9 @@ table_columns = [
   "sample_metadata_ct",
   "sample_metadata_library_concentration_ng_ul",
   "sample_metadata_library_fragment_length_bp",
+  "sample_metadata_department",
+  "sample_metadata_sequencing_runs",
+  "sample_metadata_sample_submission_signing",
   "run_name",
 ]
 visible_columns = [
@@ -98,6 +102,7 @@ visible_columns = [
   "sequencing_date",
   "generated_date",
   "sample_category",
+  "sample_metadata_classification",
   "qc_status",
   "manual_groups",
   "typing_report_subtype",

@@ -12,6 +12,7 @@ DEFAULT_VISIBLE_COLUMNS = [
     "sequencing_date",
     "generated_date",
     "sample_category",
+    "sample_metadata_classification",
     "qc_status",
     "manual_groups",
     "typing_report_subtype",
@@ -40,6 +41,9 @@ OPTIONAL_TABLE_COLUMNS = [
     "variant_af_count_02",
     "variant_af_count_03",
     "variant_af_count_04",
+    "sample_metadata_department",
+    "sample_metadata_sequencing_runs",
+    "sample_metadata_sample_submission_signing",
 ]
 
 DEFAULT_TABLE_COLUMNS = DEFAULT_VISIBLE_COLUMNS + [
@@ -73,6 +77,10 @@ DEFAULT_COLUMN_LABELS = {
     "sample_metadata_ct": "CT",
     "sample_metadata_library_concentration_ng_ul": "Lib Conc",
     "sample_metadata_library_fragment_length_bp": "Frag bp",
+    "sample_metadata_department": "Department",
+    "sample_metadata_classification": "Class",
+    "sample_metadata_sequencing_runs": "Seq Runs",
+    "sample_metadata_sample_submission_signing": "Signing",
     "run_name": "Run",
     "manual_groups": "Groups",
     "comment_count": "Comments",

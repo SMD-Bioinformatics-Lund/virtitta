@@ -34,6 +34,10 @@ SORTABLE_COLUMNS = {
     "sample_metadata_ct": "s.sample_metadata_ct",
     "sample_metadata_library_concentration_ng_ul": "s.sample_metadata_library_concentration_ng_ul",
     "sample_metadata_library_fragment_length_bp": "s.sample_metadata_library_fragment_length_bp",
+    "sample_metadata_department": "s.sample_metadata_department",
+    "sample_metadata_classification": "s.sample_metadata_classification",
+    "sample_metadata_sequencing_runs": "s.sample_metadata_sequencing_runs",
+    "sample_metadata_sample_submission_signing": "s.sample_metadata_sample_submission_signing",
     "qc_status": "COALESCE(r.qc_status, 'unreviewed')",
     "sample_category": "COALESCE(a.sample_category, '')",
     "manual_groups": "manual_groups",
@@ -230,6 +234,10 @@ def init_db(connection: sqlite3.Connection) -> None:
             sample_metadata_ct REAL,
             sample_metadata_library_concentration_ng_ul REAL,
             sample_metadata_library_fragment_length_bp INTEGER,
+            sample_metadata_department TEXT,
+            sample_metadata_classification TEXT,
+            sample_metadata_sequencing_runs TEXT,
+            sample_metadata_sample_submission_signing TEXT,
             raw_json TEXT NOT NULL,
             imported_at TEXT NOT NULL
         );
@@ -346,6 +354,10 @@ def init_db(connection: sqlite3.Connection) -> None:
     _ensure_column(connection, "samples", "variant_af_count_02", "INTEGER")
     _ensure_column(connection, "samples", "variant_af_count_03", "INTEGER")
     _ensure_column(connection, "samples", "variant_af_count_04", "INTEGER")
+    _ensure_column(connection, "samples", "sample_metadata_department", "TEXT")
+    _ensure_column(connection, "samples", "sample_metadata_classification", "TEXT")
+    _ensure_column(connection, "samples", "sample_metadata_sequencing_runs", "TEXT")
+    _ensure_column(connection, "samples", "sample_metadata_sample_submission_signing", "TEXT")
     _backfill_sequencing_dates(connection)
     connection.commit()
 
@@ -541,6 +553,8 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
             variant_af_count_005, variant_af_count_01, variant_af_count_015,
             variant_af_count_02, variant_af_count_03, variant_af_count_04,
             sample_metadata_ct, sample_metadata_library_concentration_ng_ul, sample_metadata_library_fragment_length_bp,
+            sample_metadata_department, sample_metadata_classification, sample_metadata_sequencing_runs,
+            sample_metadata_sample_submission_signing,
             raw_json, imported_at
         )
         VALUES (
@@ -552,6 +566,8 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
             :variant_af_count_005, :variant_af_count_01, :variant_af_count_015,
             :variant_af_count_02, :variant_af_count_03, :variant_af_count_04,
             :sample_metadata_ct, :sample_metadata_library_concentration_ng_ul, :sample_metadata_library_fragment_length_bp,
+            :sample_metadata_department, :sample_metadata_classification, :sample_metadata_sequencing_runs,
+            :sample_metadata_sample_submission_signing,
             :raw_json, :imported_at
         )
         ON CONFLICT(sample_run_id) DO UPDATE SET
@@ -581,6 +597,10 @@ def upsert_sample(connection: sqlite3.Connection, sample_record: dict) -> None:
             sample_metadata_ct = excluded.sample_metadata_ct,
             sample_metadata_library_concentration_ng_ul = excluded.sample_metadata_library_concentration_ng_ul,
             sample_metadata_library_fragment_length_bp = excluded.sample_metadata_library_fragment_length_bp,
+            sample_metadata_department = excluded.sample_metadata_department,
+            sample_metadata_classification = excluded.sample_metadata_classification,
+            sample_metadata_sequencing_runs = excluded.sample_metadata_sequencing_runs,
+            sample_metadata_sample_submission_signing = excluded.sample_metadata_sample_submission_signing,
             raw_json = excluded.raw_json,
             imported_at = excluded.imported_at
         """,

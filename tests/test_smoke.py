@@ -701,6 +701,10 @@ class VirtittaSmokeTests(unittest.TestCase):
                     "CT": 24.8,
                     "Library concentration (ng/ul)": 5.6,
                     "Library fragment length (bp)": 387,
+                    "Department": "Virology",
+                    "Classification": "Routine",
+                    "Sequencing runs": "260601_A01932_AHFNTGDMX2",
+                    "Sample submission signing": "signed",
                 }
             }
         )
@@ -719,10 +723,18 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(sample["sample_metadata_ct"], 24.8)
         self.assertEqual(sample["sample_metadata_library_concentration_ng_ul"], 5.6)
         self.assertEqual(sample["sample_metadata_library_fragment_length_bp"], 387)
+        self.assertEqual(sample["sample_metadata_department"], "Virology")
+        self.assertEqual(sample["sample_metadata_classification"], "Routine")
+        self.assertEqual(sample["sample_metadata_sequencing_runs"], "260601_A01932_AHFNTGDMX2")
+        self.assertEqual(sample["sample_metadata_sample_submission_signing"], "signed")
         raw = json.loads(sample["raw_json"])
         self.assertEqual(raw["sample_metadata"]["ct"], 24.8)
         self.assertEqual(raw["sample_metadata"]["library_concentration_ng_ul"], 5.6)
         self.assertEqual(raw["sample_metadata"]["library_fragment_length_bp"], 387)
+        self.assertEqual(raw["sample_metadata"]["department"], "Virology")
+        self.assertEqual(raw["sample_metadata"]["classification"], "Routine")
+        self.assertEqual(raw["sample_metadata"]["sequencing_runs"], "260601_A01932_AHFNTGDMX2")
+        self.assertEqual(raw["sample_metadata"]["sample_submission_signing"], "signed")
 
     def test_import_run_ignores_non_numeric_clarity_metadata_values(self) -> None:
         fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
@@ -1355,6 +1367,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(config.annotations.restricted_sample_categories, ["test"])
         self.assertEqual(config.ui.column_labels["sequencing_date"], "Date")
         self.assertEqual(config.ui.column_labels["generated_date"], "Import Date")
+        self.assertEqual(config.ui.column_labels["sample_metadata_classification"], "Class")
         self.assertEqual(config.ui.column_labels["variant_af_count_005"], "af 0.05")
         self.assertEqual(config.ui.column_labels["variant_af_count_01"], "af 0.1")
         self.assertEqual(config.ui.column_labels["variant_af_count_015"], "af 0.15")
@@ -1376,6 +1389,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(table_columns(config), config.ui.table_columns)
         self.assertIn("sequencing_date", config.ui.visible_columns)
         self.assertIn("sample_category", config.ui.visible_columns)
+        self.assertIn("sample_metadata_classification", config.ui.visible_columns)
         self.assertIn("manual_groups", config.ui.visible_columns)
         self.assertNotIn("qc_coverage_1000x_pct", config.ui.visible_columns)
         self.assertNotIn("variant_af_count_005", config.ui.visible_columns)
@@ -1384,18 +1398,24 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertNotIn("variant_af_count_02", config.ui.visible_columns)
         self.assertNotIn("variant_af_count_03", config.ui.visible_columns)
         self.assertNotIn("variant_af_count_04", config.ui.visible_columns)
+        self.assertNotIn("sample_metadata_department", config.ui.visible_columns)
+        self.assertNotIn("sample_metadata_sequencing_runs", config.ui.visible_columns)
+        self.assertNotIn("sample_metadata_sample_submission_signing", config.ui.visible_columns)
 
     def test_load_config_preserves_legacy_column_order_without_table_columns(self) -> None:
         config = load_config(self.config_path)
         self.assertEqual(config.ui.table_columns[: len(config.ui.visible_columns)], config.ui.visible_columns)
-        self.assertEqual(config.ui.table_columns[-7], "qc_coverage_1000x_pct")
-        self.assertEqual(config.ui.table_columns[-6:], [
+        self.assertEqual(config.ui.table_columns[-10:], [
+            "qc_coverage_1000x_pct",
             "variant_af_count_005",
             "variant_af_count_01",
             "variant_af_count_015",
             "variant_af_count_02",
             "variant_af_count_03",
             "variant_af_count_04",
+            "sample_metadata_department",
+            "sample_metadata_sequencing_runs",
+            "sample_metadata_sample_submission_signing",
         ])
 
     def test_column_visibility_storage_key_changes_with_column_defaults(self) -> None:
@@ -2085,10 +2105,14 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn(">LID001\nARYT\n", prepared_input)
         self.assertIn(">LID002\nACGTAAAA\n", prepared_input)
         self.assertIn(">LID003\nACGTAAAA\n", prepared_input)
-        self.assertIn("ID\tlid\tsample_id\tsequencing_date\tgenerated_date\tsample_category\tqc_status\tmanual_groups", metadata)
+        self.assertIn(
+            "ID\tlid\tsample_id\tsequencing_date\tgenerated_date\tsample_category\t"
+            "sample_metadata_classification\tqc_status\tmanual_groups",
+            metadata,
+        )
         self.assertIn("typing_report_subtype\ttyping_main_blast_identity\tresistance_summary", metadata)
         self.assertIn("comment_count", metadata)
-        self.assertIn("LID002\tLID002\tSAMPLE002\t2026-04-08\t2026-04-08\t\tunreviewed\t\t1a", metadata)
+        self.assertIn("LID002\tLID002\tSAMPLE002\t2026-04-08\t2026-04-08\t\t\tunreviewed\t\t1a", metadata)
 
     def test_prepare_cluster_files_requires_three_samples(self) -> None:
         self.enable_cluster()

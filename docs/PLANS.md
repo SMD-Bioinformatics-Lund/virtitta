@@ -52,6 +52,17 @@ Next steps:
 - periodically compare `python -m virtitta.cli --help` with `docs/ADMIN.md`
 - document any hidden or role-specific UI behavior when it is added
 
+### Main Table Views
+
+Goal: make it easy to switch between predefined main-table column sets as the available metadata columns grow.
+
+Next steps:
+
+- keep column identifiers stable and config-driven
+- define a small `[ui.table_views]` TOML shape with a name, label, columns, and optional default sort
+- add a main-table view selector that swaps visible columns without losing the existing per-browser column toggles
+- decide whether saved user-specific views are needed after predefined operational views are in use
+
 ### Auth Test Cleanup
 
 Goal: simplify auth-enabled test cases now that extra test packages are available in the development environment.

@@ -94,6 +94,10 @@
         <tr><th>Sample Run ID</th><td>{{ sample["sample_run_id"] }}</td></tr>
         <tr><th>Category</th><td>{{ sample["sample_category"] or "Unassigned" }}</td></tr>
         <tr><th>Groups</th><td>{{ sample["manual_groups"] or "None" }}</td></tr>
+        <tr><th>Department</th><td>{{ format_value(sample["sample_metadata_department"]) }}</td></tr>
+        <tr><th>Classification</th><td>{{ format_value(sample["sample_metadata_classification"]) }}</td></tr>
+        <tr><th>Sequencing Runs</th><td>{{ format_value(sample["sample_metadata_sequencing_runs"]) }}</td></tr>
+        <tr><th>Sample Submission Signing</th><td>{{ format_value(sample["sample_metadata_sample_submission_signing"]) }}</td></tr>
         <tr><th>Subtype</th><td><span class="{% if sample['typing_report_subtype_overridden'] %}overridden-value{% endif %}" {% if sample['typing_report_subtype_overridden'] %}title="Imported: {{ format_value(sample['imported_typing_report_subtype']) }}"{% endif %}>{{ format_value(sample["typing_report_subtype"]) }}</span></td></tr>
         <tr><th>BLAST %</th><td>{{ format_value(sample["typing_main_blast_identity"], "typing_main_blast_identity") }}</td></tr>
         <tr><th>Reads In</th><td>{{ format_value(sample["host_filter_reads_in"], "host_filter_reads_in") }}</td></tr>

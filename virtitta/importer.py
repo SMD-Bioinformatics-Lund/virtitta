@@ -76,6 +76,15 @@ def _maybe_int(value: object) -> int | None:
         return None
 
 
+def _maybe_text(value: object) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, sort_keys=True)
+    text = str(value).strip()
+    return text or None
+
+
 def _first_present(mapping: dict, keys: tuple[str, ...]) -> object:
     for key in keys:
         value = mapping.get(key)
@@ -150,6 +159,10 @@ def _load_clarity_sample_info(sample_info_path: Path | None) -> dict[str, dict[s
             "ct": _maybe_float(entry.get("CT")),
             "library_concentration_ng_ul": _maybe_float(entry.get("Library concentration (ng/ul)")),
             "library_fragment_length_bp": _maybe_int(entry.get("Library fragment length (bp)")),
+            "department": _maybe_text(entry.get("Department")),
+            "classification": _maybe_text(entry.get("Classification")),
+            "sequencing_runs": _maybe_text(entry.get("Sequencing runs")),
+            "sample_submission_signing": _maybe_text(entry.get("Sample submission signing")),
         }
 
     return sample_info_by_id
@@ -316,6 +329,14 @@ def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpa
                     "libfrag",
                 ),
             )
+        ),
+        "sample_metadata_department": _maybe_text(_first_present(sample_metadata, ("department", "Department"))),
+        "sample_metadata_classification": _maybe_text(_first_present(sample_metadata, ("classification", "Classification"))),
+        "sample_metadata_sequencing_runs": _maybe_text(
+            _first_present(sample_metadata, ("sequencing_runs", "Sequencing runs"))
+        ),
+        "sample_metadata_sample_submission_signing": _maybe_text(
+            _first_present(sample_metadata, ("sample_submission_signing", "Sample submission signing"))
         ),
         "raw_json": json.dumps(sample, sort_keys=True),
         "imported_at": imported_at,
