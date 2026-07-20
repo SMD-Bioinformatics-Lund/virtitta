@@ -47,7 +47,7 @@ restricted_sample_categories = ["test"]
 lims_root = "data/lims_exports"
 
 [imports]
-clarity_metadata_root = "/fs2/seqdata/clarity"
+clarity_metadata_root = "/fs2/seqdata/clarity/done"
 
 [cache]
 outputs_root = "data/output_cache"
