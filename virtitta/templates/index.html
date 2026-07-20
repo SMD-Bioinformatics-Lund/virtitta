@@ -86,25 +86,43 @@
       {% endif %}
       {% endif %}
     </div>
-    <details class="column-toggle-panel">
-      <summary>Columns</summary>
-      <div class="column-toggle-grid">
-        {% for column in table_columns %}
-        <label class="column-toggle">
-          <input type="checkbox" class="js-col-toggle" data-col="{{ column }}" {% if column in visible_column_set %}checked{% endif %}>
-          <span>{{ column_labels.get(column, column) }}</span>
-        </label>
+    <div class="column-view-controls">
+      {% if config.auth.enabled %}
+      <select id="column-preset-select" class="column-preset-select" aria-label="Column preset">
+        <option value="default">Default</option>
+        {% for preset in column_presets %}
+        <option value="preset:{{ preset.id }}">{{ preset.name }}</option>
         {% endfor %}
-        <label class="column-toggle">
-          <input type="checkbox" class="js-col-toggle" data-col="comment_count" checked>
-          <span>{{ column_labels.get('comment_count', 'Comments') }}</span>
-        </label>
-        <label class="column-toggle">
-          <input type="checkbox" class="js-col-toggle" data-col="actions" checked>
-          <span>Actions</span>
-        </label>
-      </div>
-    </details>
+        <option value="custom">Custom</option>
+      </select>
+      {% endif %}
+      <details class="column-toggle-panel">
+        <summary>Columns</summary>
+        {% if config.auth.enabled %}
+        <div class="column-preset-editor" data-preset-url="{{ request.url_for('save_column_preset') }}">
+          <input type="text" id="column-preset-name" maxlength="80" placeholder="Preset name" aria-label="Preset name">
+          <button type="button" id="column-preset-save">Save preset</button>
+          <button type="button" id="column-preset-delete" class="secondary" disabled>Delete</button>
+        </div>
+        {% endif %}
+        <div class="column-toggle-grid">
+          {% for column in table_columns %}
+          <label class="column-toggle">
+            <input type="checkbox" class="js-col-toggle" data-col="{{ column }}" {% if column in visible_column_set %}checked{% endif %}>
+            <span>{{ column_labels.get(column, column) }}</span>
+          </label>
+          {% endfor %}
+          <label class="column-toggle">
+            <input type="checkbox" class="js-col-toggle" data-col="comment_count" checked>
+            <span>{{ column_labels.get('comment_count', 'Comments') }}</span>
+          </label>
+          <label class="column-toggle">
+            <input type="checkbox" class="js-col-toggle" data-col="actions" checked>
+            <span>Actions</span>
+          </label>
+        </div>
+      </details>
+    </div>
   </div>
   <form method="post" action="{{ request.url_for('bulk_qc_update') }}">
     <input type="hidden" name="redirect_to" value="{{ request.url }}">
@@ -341,6 +359,13 @@ const selectedOnlyToggle = document.querySelector('[data-selected-only]');
 const clientEmptyState = document.getElementById('client-empty-state');
 const filterForm = document.querySelector('[data-filter-form]');
 const columnVisibilityStorageKey = {{ column_visibility_storage_key|tojson }};
+const configuredDefaultColumns = {{ (visible_columns + ['comment_count', 'actions'])|tojson }};
+let columnPresets = {{ column_presets|tojson }};
+const columnPresetSelect = document.getElementById('column-preset-select');
+const columnPresetEditor = document.querySelector('[data-preset-url]');
+const columnPresetName = document.getElementById('column-preset-name');
+const columnPresetSave = document.getElementById('column-preset-save');
+const columnPresetDelete = document.getElementById('column-preset-delete');
 const selectionStorageKey = 'virtitta.selectedSampleIds.v1';
 const csrfToken = {% if config.auth.enabled %}{{ request.state.current_user.csrf_token|tojson }}{% else %}''{% endif %};
 let suppressSelectionSave = false;
@@ -591,6 +616,88 @@ function saveColumnVisibility() {
   }
 }
 
+function currentVisibleColumns() {
+  return columnToggles()
+    .filter(toggle => toggle.checked)
+    .map(toggle => toggle.dataset.col);
+}
+
+function sameColumns(left, right) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const rightSet = new Set(right);
+  return left.every(column => rightSet.has(column));
+}
+
+function selectedPreset() {
+  if (!columnPresetSelect || !columnPresetSelect.value.startsWith('preset:')) {
+    return null;
+  }
+  const presetId = Number(columnPresetSelect.value.slice('preset:'.length));
+  return columnPresets.find(preset => preset.id === presetId) || null;
+}
+
+function updatePresetEditor({ preserveName = false } = {}) {
+  if (!columnPresetSelect) {
+    return;
+  }
+  const preset = selectedPreset();
+  if (columnPresetName && !preserveName) {
+    columnPresetName.value = preset ? preset.name : '';
+  }
+  if (columnPresetDelete) {
+    columnPresetDelete.disabled = !preset;
+  }
+}
+
+function renderPresetOptions(selectedValue) {
+  if (!columnPresetSelect) {
+    return;
+  }
+  columnPresets.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
+  columnPresetSelect.replaceChildren();
+  columnPresetSelect.add(new Option('Default', 'default'));
+  for (const preset of columnPresets) {
+    columnPresetSelect.add(new Option(preset.name, `preset:${preset.id}`));
+  }
+  columnPresetSelect.add(new Option('Custom', 'custom'));
+  columnPresetSelect.value = selectedValue;
+  updatePresetEditor();
+}
+
+function syncPresetSelectorToVisibility() {
+  if (!columnPresetSelect) {
+    return;
+  }
+  const visibleColumns = currentVisibleColumns();
+  if (sameColumns(visibleColumns, configuredDefaultColumns)) {
+    columnPresetSelect.value = 'default';
+  } else {
+    const match = columnPresets.find(preset => sameColumns(visibleColumns, preset.columns));
+    columnPresetSelect.value = match ? `preset:${match.id}` : 'custom';
+  }
+  updatePresetEditor();
+}
+
+function applyColumnPreset(columns) {
+  const visibleColumns = new Set(columns);
+  for (const toggle of columnToggles()) {
+    toggle.checked = visibleColumns.has(toggle.dataset.col);
+    setColumnVisibility(toggle.dataset.col, toggle.checked);
+  }
+  saveColumnVisibility();
+}
+
+async function responseErrorMessage(response, fallback) {
+  try {
+    const body = await response.json();
+    return body.detail || fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
 function applySavedColumnVisibility() {
   const visibility = readSavedColumnVisibility();
   if (!visibility || typeof visibility !== 'object') {
@@ -772,12 +879,92 @@ window.addEventListener('beforeunload', () => {
 });
 
 applySavedColumnVisibility();
+syncPresetSelectorToVisibility();
 
 for (const toggle of columnToggles()) {
   toggle.addEventListener('change', () => {
     const column = toggle.dataset.col;
     setColumnVisibility(column, toggle.checked);
     saveColumnVisibility();
+    if (columnPresetSelect) {
+      columnPresetSelect.value = 'custom';
+      updatePresetEditor({ preserveName: true });
+    }
+  });
+}
+
+if (columnPresetSelect) {
+  columnPresetSelect.addEventListener('change', () => {
+    if (columnPresetSelect.value === 'default') {
+      applyColumnPreset(configuredDefaultColumns);
+      updatePresetEditor();
+      return;
+    }
+    const preset = selectedPreset();
+    if (preset) {
+      applyColumnPreset(preset.columns);
+    }
+    updatePresetEditor();
+  });
+}
+
+if (columnPresetSave) {
+  columnPresetSave.addEventListener('click', async () => {
+    const name = columnPresetName.value.trim();
+    if (!name) {
+      showClientNotice('A preset name is required.', true);
+      columnPresetName.focus();
+      return;
+    }
+    const existing = columnPresets.find(preset => preset.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (existing && !window.confirm(`Overwrite column preset "${existing.name}"?`)) {
+      return;
+    }
+    const formData = new FormData();
+    formData.append('name', name);
+    formData.append('overwrite', existing ? 'true' : 'false');
+    formData.append('csrf_token', csrfToken);
+    for (const column of currentVisibleColumns()) {
+      formData.append('columns', column);
+    }
+    try {
+      const response = await fetch(columnPresetEditor.dataset.presetUrl, { method: 'POST', body: formData });
+      if (!response.ok) {
+        throw new Error(await responseErrorMessage(response, 'Failed to save column preset.'));
+      }
+      const body = await response.json();
+      columnPresets = columnPresets.filter(preset => preset.id !== body.preset.id);
+      columnPresets.push(body.preset);
+      renderPresetOptions(`preset:${body.preset.id}`);
+      showClientNotice(`Saved column preset "${body.preset.name}".`);
+    } catch (error) {
+      showClientNotice(error.message || 'Failed to save column preset.', true);
+    }
+  });
+}
+
+if (columnPresetDelete) {
+  columnPresetDelete.addEventListener('click', async () => {
+    const preset = selectedPreset();
+    if (!preset || !window.confirm(`Delete column preset "${preset.name}"?`)) {
+      return;
+    }
+    const formData = new FormData();
+    formData.append('csrf_token', csrfToken);
+    try {
+      const response = await fetch(`${columnPresetEditor.dataset.presetUrl}/${preset.id}`, {
+        method: 'DELETE',
+        body: formData,
+      });
+      if (!response.ok) {
+        throw new Error(await responseErrorMessage(response, 'Failed to delete column preset.'));
+      }
+      columnPresets = columnPresets.filter(item => item.id !== preset.id);
+      renderPresetOptions('custom');
+      showClientNotice(`Deleted column preset "${preset.name}".`);
+    } catch (error) {
+      showClientNotice(error.message || 'Failed to delete column preset.', true);
+    }
   });
 }
 

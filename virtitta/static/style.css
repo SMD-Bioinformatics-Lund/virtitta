@@ -244,6 +244,19 @@ a:hover {
   margin-bottom: 8px;
 }
 
+.column-view-controls {
+  display: flex;
+  flex: 1 1 560px;
+  gap: 6px;
+  align-items: start;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.column-preset-select {
+  max-width: 220px;
+}
+
 .column-toggle-panel {
   border: 1px solid var(--line);
   background: #faf5ea;
@@ -263,6 +276,25 @@ a:hover {
   cursor: pointer;
   font-size: 0.86rem;
   user-select: none;
+}
+
+.column-view-controls .column-toggle-panel[open] {
+  flex-basis: 100%;
+}
+
+.column-preset-editor {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.column-preset-editor input {
+  min-width: 180px;
+  flex: 1 1 180px;
 }
 
 .filter-panel summary {

@@ -10,7 +10,7 @@ from pathlib import Path, PureWindowsPath
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -63,6 +63,7 @@ from virtitta.repository import (
     create_cluster_job,
     delete_comment,
     delete_samples,
+    delete_user_column_preset,
     get_cluster_job,
     get_cluster_job_by_public_token,
     get_cluster_job_samples,
@@ -72,12 +73,14 @@ from virtitta.repository import (
     init_db,
     list_manual_groups,
     list_runs,
+    list_samples,
     list_stored_sample_categories,
     list_subtypes,
-    list_samples,
+    list_user_column_presets,
+    mark_stale_cluster_jobs_failed,
     raw_json_for_sample,
     remove_samples_from_group,
-    mark_stale_cluster_jobs_failed,
+    save_user_column_preset,
     set_sample_category,
     set_sample_field_overrides,
     update_qc_status,
@@ -271,6 +274,10 @@ def column_visibility_storage_key(config: Config) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     digest = hashlib.sha1(encoded).hexdigest()[:12]
     return f"virtitta.columnVisibility.v2.{digest}"
+
+
+def available_preset_columns(config: Config) -> list[str]:
+    return [*config.ui.table_columns, "comment_count", "actions"]
 
 
 def configured_category_options(config: Config, stored_categories: list[str], selected_categories: list[str]) -> list[str]:
@@ -1020,6 +1027,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if not csrf_token or not secrets.compare_digest(csrf_token, current_user.csrf_token):
             raise HTTPException(status_code=403, detail="Invalid CSRF token")
 
+    def require_authenticated_user(request: Request):
+        current_user = getattr(request.state, "current_user", None)
+        if not config.auth.enabled or current_user is None or not current_user.authenticated:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        return current_user
+
     def can_delete_comment(request: Request, comment: dict) -> bool:
         if permission_allowed(request, PERMISSION_COMMENT_DELETE):
             return True
@@ -1134,6 +1147,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         max_ct_value = parse_optional_float(max_ct)
         all_columns = table_columns(config)
         visible_column_set = set(config.ui.visible_columns)
+        column_presets = []
 
         connection = connect(config.database.path)
         try:
@@ -1157,6 +1171,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             subtypes = list_subtypes(connection)
             stored_sample_categories = list_stored_sample_categories(connection)
             available_manual_groups = list_manual_groups(connection)
+            if config.auth.enabled:
+                current_user = require_authenticated_user(request)
+                allowed_columns = set(available_preset_columns(config))
+                column_presets = list_user_column_presets(connection, current_user.username)
+                for preset in column_presets:
+                    preset["columns"] = [column for column in preset["columns"] if column in allowed_columns]
         finally:
             connection.close()
 
@@ -1193,6 +1213,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "visible_columns": config.ui.visible_columns,
                 "visible_column_set": visible_column_set,
                 "column_visibility_storage_key": column_visibility_storage_key(config),
+                "column_presets": column_presets,
                 "column_labels": {**DEFAULT_COLUMN_LABELS, **config.ui.column_labels},
                 "cell_class": lambda column, value: cell_class(config, column, value),
                 "cell_display_class": cell_display_class,
@@ -1242,6 +1263,60 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 },
             },
         )
+
+    @app.post("/column-presets")
+    async def save_column_preset(
+        request: Request,
+        name: str = Form(default=""),
+        columns: list[str] = Form(default=[]),
+        overwrite: bool = Form(default=False),
+        csrf_token: str = Form(default=""),
+    ):
+        require_permission(request, PERMISSION_VIEW)
+        current_user = require_authenticated_user(request)
+        require_csrf(request, csrf_token)
+
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise HTTPException(status_code=400, detail="A preset name is required")
+        if len(normalized_name) > 80:
+            raise HTTPException(status_code=400, detail="Preset names must be 80 characters or fewer")
+        allowed_columns = set(available_preset_columns(config))
+        if len(columns) != len(set(columns)) or any(column not in allowed_columns for column in columns):
+            raise HTTPException(status_code=400, detail="Invalid preset columns")
+
+        connection = connect(config.database.path)
+        try:
+            preset = save_user_column_preset(
+                connection,
+                current_user.username,
+                normalized_name,
+                columns,
+                overwrite=overwrite,
+            )
+        finally:
+            connection.close()
+        if preset is None:
+            raise HTTPException(status_code=409, detail="A preset with that name already exists")
+        return JSONResponse({"preset": preset})
+
+    @app.delete("/column-presets/{preset_id}", status_code=204)
+    async def delete_column_preset(
+        request: Request,
+        preset_id: int,
+        csrf_token: str = Form(default=""),
+    ):
+        require_permission(request, PERMISSION_VIEW)
+        current_user = require_authenticated_user(request)
+        require_csrf(request, csrf_token)
+        connection = connect(config.database.path)
+        try:
+            deleted = delete_user_column_preset(connection, current_user.username, preset_id)
+        finally:
+            connection.close()
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Column preset not found")
+        return Response(status_code=204)
 
     @app.post("/samples/category")
     async def bulk_category_update(

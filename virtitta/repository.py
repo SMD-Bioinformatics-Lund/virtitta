@@ -333,6 +333,16 @@ def init_db(connection: sqlite3.Connection) -> None:
             expires_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS user_column_presets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL REFERENCES auth_users(username) ON DELETE CASCADE,
+            name TEXT NOT NULL COLLATE NOCASE,
+            columns_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (username, name)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_samples_run_name ON samples(run_name);
         CREATE INDEX IF NOT EXISTS idx_samples_sample_id ON samples(sample_id);
         CREATE INDEX IF NOT EXISTS idx_samples_lid ON samples(lid);
@@ -344,6 +354,7 @@ def init_db(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_cluster_jobs_public_token ON cluster_jobs(public_token);
         CREATE INDEX IF NOT EXISTS idx_cluster_job_samples_job_id ON cluster_job_samples(job_id);
         CREATE INDEX IF NOT EXISTS idx_auth_sessions_username ON auth_sessions(username);
+        CREATE INDEX IF NOT EXISTS idx_user_column_presets_username ON user_column_presets(username);
         """
     )
     _ensure_column(connection, "samples", "sequencing_date", "TEXT")
@@ -993,6 +1004,75 @@ def get_auth_user(connection: sqlite3.Connection, username: str) -> dict | None:
         (username,),
     ).fetchone()
     return _row_to_dict(row)
+
+
+def list_user_column_presets(connection: sqlite3.Connection, username: str) -> list[dict]:
+    presets = []
+    for row in connection.execute(
+        """
+        SELECT id, name, columns_json, created_at, updated_at
+        FROM user_column_presets
+        WHERE username = ?
+        ORDER BY name COLLATE NOCASE ASC, id ASC
+        """,
+        (username,),
+    ).fetchall():
+        preset = _row_to_dict(row)
+        preset["columns"] = json.loads(preset.pop("columns_json"))
+        presets.append(preset)
+    return presets
+
+
+def save_user_column_preset(
+    connection: sqlite3.Connection,
+    username: str,
+    name: str,
+    columns: list[str],
+    *,
+    overwrite: bool = False,
+) -> dict | None:
+    now = utc_now()
+    columns_json = json.dumps(columns, separators=(",", ":"))
+    existing = connection.execute(
+        """
+        SELECT id
+        FROM user_column_presets
+        WHERE username = ? AND name = ? COLLATE NOCASE
+        """,
+        (username, name),
+    ).fetchone()
+    if existing is not None:
+        if not overwrite:
+            return None
+        preset_id = existing["id"]
+        connection.execute(
+            """
+            UPDATE user_column_presets
+            SET name = ?, columns_json = ?, updated_at = ?
+            WHERE id = ? AND username = ?
+            """,
+            (name, columns_json, now, preset_id, username),
+        )
+    else:
+        result = connection.execute(
+            """
+            INSERT INTO user_column_presets (username, name, columns_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (username, name, columns_json, now, now),
+        )
+        preset_id = result.lastrowid
+    connection.commit()
+    return next(preset for preset in list_user_column_presets(connection, username) if preset["id"] == preset_id)
+
+
+def delete_user_column_preset(connection: sqlite3.Connection, username: str, preset_id: int) -> bool:
+    result = connection.execute(
+        "DELETE FROM user_column_presets WHERE id = ? AND username = ?",
+        (preset_id, username),
+    )
+    connection.commit()
+    return result.rowcount > 0
 
 
 def list_auth_users(connection: sqlite3.Connection) -> list[dict]:

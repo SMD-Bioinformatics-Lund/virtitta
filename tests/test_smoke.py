@@ -44,6 +44,7 @@ from virtitta.repository import (
     connect,
     create_auth_user,
     create_cluster_job,
+    delete_user_column_preset,
     get_cluster_job,
     get_cluster_job_samples,
     get_comments,
@@ -55,7 +56,9 @@ from virtitta.repository import (
     list_samples_for_cache_verification,
     list_samples,
     list_stored_sample_categories,
+    list_user_column_presets,
     remove_samples_from_group,
+    save_user_column_preset,
     set_sample_category,
     set_sample_field_overrides,
     update_qc_status,
@@ -1717,6 +1720,8 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("window.history.replaceState", rendered)
         self.assertIn("virtitta.columnVisibility.v2.", rendered)
         self.assertIn("applySavedColumnVisibility();", rendered)
+        self.assertNotIn('id="column-preset-select"', rendered)
+        self.assertNotIn('id="column-preset-save"', rendered)
         self.assertIn('data-filter-form', rendered)
         self.assertIn('name="run_name" class="js-auto-submit-filter"', rendered)
         self.assertIn("filterForm.requestSubmit();", rendered)
@@ -2935,6 +2940,131 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(start["status"], 303)
         self.assertIn("/login?next=%2F", headers["location"])
 
+    def test_column_preset_repository_is_scoped_by_user_and_requires_explicit_overwrite(self) -> None:
+        config = load_config(self.config_path)
+        conn = connect(config.database.path)
+        try:
+            init_db(conn)
+            create_auth_user(conn, "alice", "hash", "viewer", "Alice")
+            create_auth_user(conn, "bob", "hash", "viewer", "Bob")
+
+            preset = save_user_column_preset(conn, "alice", "Review", ["lid", "actions"])
+            self.assertIsNotNone(preset)
+            self.assertIsNone(save_user_column_preset(conn, "alice", "review", ["sample_id"]))
+            overwritten = save_user_column_preset(
+                conn,
+                "alice",
+                "review",
+                ["sample_id"],
+                overwrite=True,
+            )
+
+            self.assertEqual(overwritten["id"], preset["id"])
+            self.assertEqual(overwritten["columns"], ["sample_id"])
+            self.assertEqual(list_user_column_presets(conn, "bob"), [])
+            self.assertFalse(delete_user_column_preset(conn, "bob", preset["id"]))
+            self.assertTrue(delete_user_column_preset(conn, "alice", preset["id"]))
+            save_user_column_preset(conn, "alice", "Temporary", ["lid"])
+            conn.execute("DELETE FROM auth_users WHERE username = ?", ("alice",))
+            conn.commit()
+            self.assertEqual(list_user_column_presets(conn, "alice"), [])
+        finally:
+            conn.close()
+
+    def test_viewer_can_manage_owned_column_presets(self) -> None:
+        self.enable_auth()
+        self.create_local_user("viewer", "viewer")
+        self.create_local_user("other", "viewer")
+        app = create_app(self.config_path)
+        _token, viewer = self.login_local_user("viewer")
+        _other_token, other = self.login_local_user("other")
+        save_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/column-presets")
+        delete_route = next(
+            route
+            for route in app.router.routes
+            if getattr(route, "path", None) == "/column-presets/{preset_id}"
+        )
+
+        with self.assertRaises(HTTPException) as csrf_error:
+            asyncio.run(
+                save_route.endpoint(
+                    self.make_user_request(app, viewer, method="POST"),
+                    name="Review",
+                    columns=["lid", "actions"],
+                    overwrite=False,
+                    csrf_token="",
+                )
+            )
+        self.assertEqual(csrf_error.exception.status_code, 403)
+
+        response = asyncio.run(
+            save_route.endpoint(
+                self.make_user_request(app, viewer, method="POST"),
+                name="Review",
+                columns=["lid", "actions"],
+                overwrite=False,
+                csrf_token=viewer.csrf_token,
+            )
+        )
+        preset = json.loads(response.body)["preset"]
+        self.assertEqual(preset["columns"], ["lid", "actions"])
+
+        with self.assertRaises(HTTPException) as duplicate_error:
+            asyncio.run(
+                save_route.endpoint(
+                    self.make_user_request(app, viewer, method="POST"),
+                    name="review",
+                    columns=["sample_id"],
+                    overwrite=False,
+                    csrf_token=viewer.csrf_token,
+                )
+            )
+        self.assertEqual(duplicate_error.exception.status_code, 409)
+
+        overwrite_response = asyncio.run(
+            save_route.endpoint(
+                self.make_user_request(app, viewer, method="POST"),
+                name="review",
+                columns=["sample_id"],
+                overwrite=True,
+                csrf_token=viewer.csrf_token,
+            )
+        )
+        overwritten = json.loads(overwrite_response.body)["preset"]
+        self.assertEqual(overwritten["id"], preset["id"])
+        self.assertEqual(overwritten["columns"], ["sample_id"])
+
+        with self.assertRaises(HTTPException) as invalid_error:
+            asyncio.run(
+                save_route.endpoint(
+                    self.make_user_request(app, viewer, method="POST"),
+                    name="Invalid",
+                    columns=["not_a_column"],
+                    overwrite=False,
+                    csrf_token=viewer.csrf_token,
+                )
+            )
+        self.assertEqual(invalid_error.exception.status_code, 400)
+
+        with self.assertRaises(HTTPException) as ownership_error:
+            asyncio.run(
+                delete_route.endpoint(
+                    self.make_user_request(app, other, method="DELETE"),
+                    preset["id"],
+                    csrf_token=other.csrf_token,
+                )
+            )
+        self.assertEqual(ownership_error.exception.status_code, 404)
+
+        delete_response = asyncio.run(
+            delete_route.endpoint(
+                self.make_user_request(app, viewer, method="DELETE"),
+                preset["id"],
+                csrf_token=viewer.csrf_token,
+            )
+        )
+        self.assertEqual(delete_response.status_code, 204)
+
     def test_auth_public_path_exemption_includes_cluster_artifacts(self) -> None:
         self.assertTrue(is_public_request_path("/clusters/public/public-token/grapetree.json"))
         self.assertTrue(is_public_request_path("/clusters/public/public-token/metadata.txt"))
@@ -2945,6 +3075,11 @@ class VirtittaSmokeTests(unittest.TestCase):
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
         self.create_local_user("viewer", "viewer")
+        conn = connect(config.database.path)
+        try:
+            save_user_column_preset(conn, "viewer", "Review", ["lid", "actions"])
+        finally:
+            conn.close()
         app = create_app(self.config_path)
         _token, user = self.login_local_user("viewer")
         route = next(route for route in app.router.routes if getattr(route, "path", None) == "/")
@@ -2967,6 +3102,11 @@ class VirtittaSmokeTests(unittest.TestCase):
         rendered = response.body.decode("utf-8")
         self.assertIn("viewer", rendered)
         self.assertIn("Table to clipboard", rendered)
+        self.assertIn('id="column-preset-select"', rendered)
+        self.assertIn('value="preset:', rendered)
+        self.assertIn(">Review</option>", rendered)
+        self.assertIn('id="column-preset-save"', rendered)
+        self.assertIn('id="column-preset-delete"', rendered)
         self.assertNotIn("Mark pass", rendered)
         self.assertNotIn("Delete samples", rendered)
         self.assertNotIn("Add group", rendered)

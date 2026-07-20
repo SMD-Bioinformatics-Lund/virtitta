@@ -15,6 +15,11 @@ Key behavior:
 - Column visibility can be changed from the `Columns` panel. `Classification` is shown by default when imported from
   Clarity metadata; `Department`, `Sequencing Runs`, and `Sample Submission Signing` are available as optional columns
   and on the sample detail page.
+- When authentication is enabled, the selector beside `Columns` applies the configured default or a column preset saved
+  to the current user account. Save and delete controls are inside the `Columns` panel. Changing an individual column
+  marks the current combination as `Custom`; it does not modify a saved preset until the user explicitly saves and
+  confirms any overwrite.
+- The most recent column combination remains browser-local and is restored independently of saved account presets.
 - Native browser hover tooltips show full values for truncated table cells and comments.
 
 ## Selection
