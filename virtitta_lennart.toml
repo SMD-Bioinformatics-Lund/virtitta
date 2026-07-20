@@ -100,7 +100,6 @@ visible_columns = [
   "lid",
   "sample_id",
   "sequencing_date",
-  "generated_date",
   "sample_category",
   "sample_metadata_classification",
   "qc_status",
