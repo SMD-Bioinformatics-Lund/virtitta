@@ -69,12 +69,13 @@ from virtitta.repository import (
 FIXTURE_PATH = Path("/home/jonas/git/virpipa/assets/test_data/qc_summary/qc_summary.json")
 
 
-def write_test_config(config_path: Path, *, root: Path, db_path: Path) -> None:
+def write_test_config(config_path: Path, *, root: Path, db_path: Path, root_path: str = "") -> None:
     config_path.write_text(
         "\n".join(
             [
                 "[app]",
                 'title = "Virtitta Test"',
+                f'root_path = "{root_path}"',
                 "",
                 "[database]",
                 f'path = "{db_path.as_posix()}"',
@@ -107,7 +108,15 @@ def write_test_config(config_path: Path, *, root: Path, db_path: Path) -> None:
 
 
 class VirtittaSmokeTests(unittest.TestCase):
-    def make_request(self, app, *, path: str = "/", method: str = "GET", query_string: bytes = b"") -> Request:
+    def make_request(
+        self,
+        app,
+        *,
+        path: str = "/",
+        method: str = "GET",
+        query_string: bytes = b"",
+        root_path: str = "",
+    ) -> Request:
         return Request(
             {
                 "type": "http",
@@ -115,6 +124,7 @@ class VirtittaSmokeTests(unittest.TestCase):
                 "method": method,
                 "scheme": "http",
                 "path": path,
+                "root_path": root_path,
                 "raw_path": path.encode("utf-8"),
                 "query_string": query_string,
                 "headers": [],
@@ -130,7 +140,14 @@ class VirtittaSmokeTests(unittest.TestCase):
         request.state.current_user = user
         return request
 
-    def asgi_request(self, app, *, path: str = "/", method: str = "GET") -> list[dict]:
+    def asgi_request(
+        self,
+        app,
+        *,
+        path: str = "/",
+        method: str = "GET",
+        root_path: str = "",
+    ) -> list[dict]:
         messages = []
         request_sent = False
 
@@ -151,6 +168,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             "method": method,
             "scheme": "http",
             "path": path,
+            "root_path": root_path,
             "raw_path": path.encode("utf-8"),
             "query_string": b"",
             "headers": [],
@@ -1387,6 +1405,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(config.auth.provider, "local")
         self.assertEqual(config.auth.session_days, 7)
         self.assertEqual(config.auth.cookie_name, "virtitta_session")
+        self.assertEqual(config.app.root_path, "")
         self.assertIn("qc_coverage_1000x_pct", config.ui.table_columns)
         self.assertIn("variant_af_count_005", config.ui.table_columns)
         self.assertEqual(table_columns(config), config.ui.table_columns)
@@ -2435,10 +2454,16 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertNotIn("metadata=", grapetree_url)
 
     def test_grapetree_url_uses_configured_public_base_url(self) -> None:
+        write_test_config(
+            self.config_path,
+            root=self.tmp_path,
+            db_path=self.db_path,
+            root_path="/review",
+        )
         self.enable_cluster(public_base_url="https://virtitta.example.org/review")
         config = load_config(self.config_path)
         app = create_app(self.config_path)
-        request = self.make_request(app)
+        request = self.make_request(app, root_path=config.app.root_path)
         job = {"id": "job1", "status": "completed", "public_token": "public-token", "selected_count": 2}
 
         grapetree_url = build_grapetree_url(config, request, job)
@@ -2939,6 +2964,39 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertEqual(start["status"], 303)
         self.assertIn("/login?next=%2F", headers["location"])
+
+    def test_root_path_prefixes_generated_urls_and_redirects(self) -> None:
+        write_test_config(
+            self.config_path,
+            root=self.tmp_path,
+            db_path=self.db_path,
+            root_path="/virtitta/",
+        )
+        self.enable_auth()
+        config = load_config(self.config_path)
+        app = create_app(self.config_path)
+
+        request = self.make_request(app, root_path=config.app.root_path)
+        messages = self.asgi_request(app, root_path=config.app.root_path)
+        start = next(message for message in messages if message["type"] == "http.response.start")
+        headers = {key.decode("ascii"): value.decode("ascii") for key, value in start["headers"]}
+
+        self.assertEqual(config.app.root_path, "/virtitta")
+        self.assertEqual(config.webigv.igv_js_url, "/virtitta/static/igv.min.js")
+        self.assertEqual(str(request.url_for("index")), "http://testserver/virtitta/")
+        self.assertEqual(start["status"], 303)
+        self.assertIn("/virtitta/login?next=%2F", headers["location"])
+
+        self.create_local_user("reviewer", "reviewer")
+        login_route = next(
+            route
+            for route in app.router.routes
+            if getattr(route, "path", None) == "/login" and "POST" in route.methods
+        )
+        login_response = asyncio.run(
+            login_route.endpoint(username="reviewer", password="secret", next="/")
+        )
+        self.assertIn("Path=/virtitta", login_response.headers["set-cookie"])
 
     def test_column_preset_repository_is_scoped_by_user_and_requires_explicit_overwrite(self) -> None:
         config = load_config(self.config_path)

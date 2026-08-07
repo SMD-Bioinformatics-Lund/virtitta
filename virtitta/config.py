@@ -103,6 +103,7 @@ class AppSettings:
     title: str = "Virtitta"
     host: str = "127.0.0.1"
     port: int = 8000
+    root_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -319,12 +320,25 @@ def load_config(config_path: str | Path | None = None) -> Config:
         for entry in root_entries
     ]
 
+    root_path = str(app_raw.get("root_path", "")).strip().rstrip("/")
+    if root_path and not root_path.startswith("/"):
+        raise ValueError("app.root_path must be empty or start with '/'")
+    webigv_js_url = str(webigv_raw.get("igv_js_url", "/static/igv.min.js"))
+    if (
+        root_path
+        and webigv_js_url.startswith("/")
+        and webigv_js_url != root_path
+        and not webigv_js_url.startswith(f"{root_path}/")
+    ):
+        webigv_js_url = f"{root_path}{webigv_js_url}"
+
     return Config(
         config_path=path.resolve(),
         app=AppSettings(
             title=str(app_raw.get("title", "Virtitta")),
             host=str(app_raw.get("host", "127.0.0.1")),
             port=int(app_raw.get("port", 8000)),
+            root_path=root_path,
         ),
         database=DatabaseSettings(
             path=(base_dir / db_raw.get("path", "data/virtitta.sqlite3")).resolve()
@@ -337,7 +351,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
         ),
         webigv=WebIgvSettings(
             enabled=bool(webigv_raw.get("enabled", False)),
-            igv_js_url=str(webigv_raw.get("igv_js_url", "/static/igv.min.js")),
+            igv_js_url=webigv_js_url,
         ),
         cluster=ClusterSettings(
             enabled=bool(cluster_raw.get("enabled", False)),

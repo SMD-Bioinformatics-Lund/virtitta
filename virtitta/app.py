@@ -703,6 +703,11 @@ def build_grapetree_url(config: Config, request: Request, job: dict) -> str:
     generated_url = str(request.url_for("cluster_public_artifact", public_token=token, artifact_key="grapetree.json"))
     if config.cluster.public_base_url:
         generated_path = urlsplit(generated_url).path
+        if config.app.root_path and (
+            generated_path == config.app.root_path
+            or generated_path.startswith(f"{config.app.root_path}/")
+        ):
+            generated_path = generated_path[len(config.app.root_path) :] or "/"
         tree_url = f"{config.cluster.public_base_url}{generated_path}"
     else:
         tree_url = generated_url
@@ -1001,7 +1006,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         yield
         app.state.cluster_executor.shutdown(wait=False, cancel_futures=False)
 
-    app = FastAPI(title=config.app.title, lifespan=lifespan)
+    app = FastAPI(title=config.app.title, root_path=config.app.root_path, lifespan=lifespan)
     app.state.cluster_executor = ThreadPoolExecutor(max_workers=config.cluster.max_concurrent_jobs)
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -1062,6 +1067,21 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         response = await call_next(request)
         return response
 
+    @app.middleware("http")
+    async def root_path_redirect_middleware(request: Request, call_next):
+        response = await call_next(request)
+        location = response.headers.get("location")
+        if (
+            config.app.root_path
+            and location
+            and location.startswith("/")
+            and not location.startswith("//")
+            and location != config.app.root_path
+            and not location.startswith(f"{config.app.root_path}/")
+        ):
+            response.headers["location"] = f"{config.app.root_path}{location}"
+        return response
+
     @app.get("/login", response_class=HTMLResponse)
     def login_form(
         request: Request,
@@ -1104,6 +1124,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         response.set_cookie(
             config.auth.cookie_name,
             session_token,
+            path=config.app.root_path or "/",
             httponly=True,
             secure=config.auth.cookie_secure,
             samesite="lax",
@@ -1116,7 +1137,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         require_csrf(request, csrf_token)
         logout_session(config, request.cookies.get(config.auth.cookie_name))
         response = RedirectResponse("/login", status_code=303)
-        response.delete_cookie(config.auth.cookie_name)
+        response.delete_cookie(config.auth.cookie_name, path=config.app.root_path or "/")
         return response
 
     @app.get("/", response_class=HTMLResponse)

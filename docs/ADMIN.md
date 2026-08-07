@@ -27,6 +27,7 @@ Runtime configuration is read from `virtitta.toml`.
 
 Important sections:
 
+- `[app]`: title, bind address, port, and optional reverse-proxy `root_path`
 - `[database]`: SQLite database path
 - `[results_roots]`: Linux and Windows-visible VirPipa result roots
 - `[exports]`: server-side LIMS export root
@@ -343,16 +344,116 @@ Disabling a user clears active sessions for that user.
 
 ## Deployment Notes
 
-For short-term colleague feedback:
+Virtitta has one container image for both direct local use and HTTPS reverse-proxy deployment. The image contains
+Python, Virtitta, MAFFT, and IQ-TREE. Configuration, persistent application data, result roots, and optional metadata
+roots remain outside the image.
 
-- create a micromamba environment for the web host
-- run Virtitta through a systemd service
-- put a reverse proxy in front for HTTPS
-- enable auth and secure cookies
+### Standalone Docker Service
 
-For longer-term production deployment:
+Copy `.env.example` to `.env` and set the host paths. The container paths in `.env` must match the corresponding
+`linux_path` and `clarity_metadata_root` values in the mounted TOML file. For example:
 
-- build a slim Python container
-- mount `virtitta.toml`, the SQLite database directory, cache/export directories, and result roots
-- keep TLS termination in the reverse proxy
-- consider LDAP/AD as an auth provider while keeping Virtitta permissions internal
+```toml
+[app]
+root_path = ""
+
+[imports]
+clarity_metadata_root = "/clarity"
+
+[[results_roots]]
+name = "hcv_results"
+linux_path = "/results"
+windows_path = "Q:/virpipa/hcv"
+```
+
+Keep authentication cookies non-secure only for direct HTTP testing. Create the persistent data directory, then build
+and start the service:
+
+```bash
+mkdir -p data
+docker compose build
+docker compose up -d
+docker compose logs -f virtitta
+```
+
+The examples use the current `docker compose` plugin. On a host that uses legacy Compose, substitute `docker-compose`;
+the automated import wrapper detects either command.
+
+The defaults expose Virtitta only at `http://127.0.0.1:8000/`. Set `VIRTITTA_LISTEN_ADDRESS=0.0.0.0` only when direct
+LAN access is intentional, and enable authentication before doing so. Run administrative commands as one-shot
+containers so they use the same image and mounts as the web service:
+
+```bash
+docker compose run --rm --no-deps virtitta init-db --config /config/virtitta.toml
+docker compose run --rm --no-deps virtitta create-user --config /config/virtitta.toml --username USER --role reviewer
+docker compose run --rm --no-deps virtitta import-run --config /config/virtitta.toml --run-dir /results/RUN
+```
+
+The container runs as the non-root user supplied by the micromamba base image. Ensure that user can write the host
+directory configured by `VIRTITTA_DATA` and read all mounted configuration, result, and metadata paths.
+
+### Apache HTTPS Deployment Under `/virtitta`
+
+Use the same image with server-specific `.env` values. The current server deployment should publish only to loopback:
+
+```dotenv
+VIRTITTA_LISTEN_ADDRESS=127.0.0.1
+VIRTITTA_PORT=5812
+VIRTITTA_CONFIG=/data/bnf/dev/jonas/hcv/virtitta/virtitta_lennart.toml
+VIRTITTA_DATA=/data/bnf/dev/jonas/hcv/virtitta/data
+VIRTITTA_RESULTS_ROOT=/access/virpipa/hcv
+VIRTITTA_RESULTS_CONTAINER_ROOT=/access/virpipa/hcv
+VIRTITTA_CLARITY_ROOT=/fs2/seqdata/clarity/done
+VIRTITTA_CLARITY_CONTAINER_ROOT=/fs2/seqdata/clarity/done
+VIRTITTA_FORWARDED_ALLOW_IPS=*
+```
+
+The deployed TOML settings must include:
+
+```toml
+[app]
+root_path = "/virtitta"
+
+[cluster]
+public_base_url = "https://mtlucmds1.lund.skane.se/virtitta"
+
+[auth]
+enabled = true
+cookie_secure = true
+```
+
+`deploy/apache-virtitta.conf` contains the proxy directives to place in the existing TLS-enabled Apache configuration.
+Confirm that `proxy`, `proxy_http`, and `headers` are enabled and run `apache2ctl configtest` before reloading Apache.
+The trailing slashes in the `ProxyPass` directives deliberately strip `/virtitta` before forwarding; Virtitta's
+`app.root_path` adds the prefix back to generated public URLs.
+
+`VIRTITTA_FORWARDED_ALLOW_IPS=*` is appropriate here only because the published backend port is restricted to host
+loopback and Apache replaces the forwarded scheme. Do not combine this setting with an externally published backend
+port.
+
+### Automated Imports
+
+The `.sqlimport` file format and its `.running`, `.done`, and `.error` lifecycle do not change. Configure the existing
+runner to call `deploy/virtitta-import`; it appends the marker contents as before:
+
+```json
+"command": "/data/bnf/dev/jonas/hcv/virtitta/deploy/virtitta-import"
+```
+
+The wrapper invokes `docker compose run --rm --no-deps` with the same image and mounts as the web service, forwards all
+arguments unchanged, and returns Virtitta's exit status. Marker validation, reporting, retries, and suffix changes stay
+with the existing runner.
+
+### Persistent Data And Updates
+
+Back up the directory configured by `VIRTITTA_DATA`; it contains the SQLite database, cached outputs, clustering
+artifacts, and LIMS exports when the supplied relative paths are used. Rebuild and recreate the service after an
+application update:
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+Keep TLS termination in Apache. LDAP/AD remains a possible future authentication provider while Virtitta permissions
+remain internal.
