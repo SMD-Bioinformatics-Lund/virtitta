@@ -1,7 +1,8 @@
 FROM mambaorg/micromamba:2.8.1
 
-# Lennart's legacy Docker builder does not expand environment variables in
-# COPY --chown. The base image's mambauser account is UID/GID 57439.
+# Build this image on a modern Docker host, then transfer it to Lennart with
+# docker save/load. Numeric ownership keeps the image compatible with legacy
+# image metadata; the base image's mambauser account is UID/GID 57439.
 COPY --chown=57439:57439 environment.container.yml /tmp/environment.yml
 RUN micromamba install --yes --name base --file /tmp/environment.yml \
     && micromamba clean --all --yes

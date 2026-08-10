@@ -401,8 +401,8 @@ Use the same image with server-specific `.env` values. The current server deploy
 ```dotenv
 VIRTITTA_LISTEN_ADDRESS=127.0.0.1
 VIRTITTA_PORT=5812
-VIRTITTA_CONFIG=/data/bnf/dev/jonas/hcv/virtitta/virtitta_lennart.toml
-VIRTITTA_DATA=/data/bnf/dev/jonas/hcv/virtitta/data
+VIRTITTA_CONFIG=/path/to/virtitta.toml
+VIRTITTA_DATA=/path/to/virtitta-data
 VIRTITTA_RESULTS_ROOT=/access/virpipa/hcv
 VIRTITTA_RESULTS_CONTAINER_ROOT=/access/virpipa/hcv
 VIRTITTA_CLARITY_ROOT=/fs2/seqdata/clarity/done
@@ -460,22 +460,50 @@ docker compose up -d
 Keep TLS termination in Apache. LDAP/AD remains a possible future authentication provider while Virtitta permissions
 remain internal.
 
-### Lennart Legacy Docker Builder
+### Lennart Legacy Deployment Directory
 
-The modern `Dockerfile` and `compose.yaml` remain the defaults for current Docker installations. Lennart's older Docker
-builder does not expand `$MAMBA_USER` in `COPY --chown`, so use the separate legacy files there. They use the numeric
-UID/GID of the base image's `mambauser`, keep the container service on port `8000`, and publish it on host loopback port
-`8803`:
+The modern `Dockerfile` and `compose.yaml` remain the defaults for current Docker installations. Lennart runs Docker
+18.09 with a seccomp profile that rejects a syscall used by current Micromamba. Its builder also does not expand
+`$MAMBA_USER` in `COPY --chown`. Build the separate Lennart image on a modern Docker host and transfer the resulting
+archive instead of building it on Lennart:
 
 ```bash
-docker-compose --project-directory . --file compose.lennart.yaml build
-docker-compose --project-directory . --file compose.lennart.yaml up -d
-docker-compose --project-directory . --file compose.lennart.yaml logs -f virtitta
+./deploy/lennart/build-image
+rsync -a deploy/lennart/ jonas@MTLUCMDS1:/data/bnf/dev/jonas/hcv/virtitta-docker/
 ```
 
-For a new deployment, copy `.env.lennart.example` to `.env` first. For an existing deployment, retain its `.env` and
-compare it with the example instead of overwriting it.
+Everything needed at runtime is now contained in that server directory: `docker-compose.yml`, `.env`, `virtitta.toml`,
+the image archive, the import wrapper, the Apache snippet, and persistent `data/`. On a new deployment, create `.env`
+and `data/` once:
 
-Use `deploy/apache-virtitta-lennart.conf` for the matching Apache proxy and `deploy/virtitta-import-lennart` for
-automated or manual imports. Do not copy the Lennart Dockerfile over the modern one; both variants are maintained
-side-by-side.
+```bash
+cd /data/bnf/dev/jonas/hcv/virtitta-docker
+cp .env.example .env
+mkdir -p data
+```
+
+For an existing deployment, retain `.env` and `data/` when updating the other files. Set `VIRTITTA_UID` and
+`VIRTITTA_GID` to the numeric owner that should manage the data, then make the existing database and directories match:
+
+```bash
+id -u
+id -g
+sudo chown -R "$(id -u):$(id -g)" data
+```
+
+Load and start the transferred image:
+
+```bash
+gzip -dc virtitta-image.tar.gz | docker load
+docker-compose up -d
+docker-compose logs -f virtitta
+```
+
+Use `./import-run --run-dir /access/virpipa/hcv/RUN` for manual imports and configure the existing `.sqlimport` runner
+to call `/data/bnf/dev/jonas/hcv/virtitta-docker/import-run`. The matching Apache directives are in `apache.conf`.
+
+The directory's `docker-compose.yml` applies `seccomp=unconfined` only to Virtitta. This is required because the old
+profile returns `EPERM` for syscalls unknown to Docker 18.09, preventing Micromamba environment activation. The
+service remains non-root, publishes only on host loopback, mounts configuration/results/metadata read-only, and
+receives write access only to the configured Virtitta data directory. Remove this exception when the server is
+replaced.

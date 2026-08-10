@@ -8,3 +8,5 @@ dist/
 build/
 data/
 
+.env
+*.tar.gz

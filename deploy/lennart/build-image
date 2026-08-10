@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_dir=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+image_name=${VIRTITTA_LENNART_IMAGE:-virtitta:lennart}
+archive_path=${1:-$script_dir/virtitta-image.tar.gz}
+
+docker build --file "$script_dir/Dockerfile" --tag "$image_name" "$project_dir"
+docker save "$image_name" | gzip > "$archive_path"
+printf 'Wrote %s\n' "$archive_path"

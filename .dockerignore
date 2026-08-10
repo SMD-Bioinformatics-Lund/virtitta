@@ -6,4 +6,4 @@ __pycache__
 data
 tests
 virtitta.toml
-virtitta_lennart.toml
+*.tar.gz
