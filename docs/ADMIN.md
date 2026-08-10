@@ -459,3 +459,23 @@ docker compose up -d
 
 Keep TLS termination in Apache. LDAP/AD remains a possible future authentication provider while Virtitta permissions
 remain internal.
+
+### Lennart Legacy Docker Builder
+
+The modern `Dockerfile` and `compose.yaml` remain the defaults for current Docker installations. Lennart's older Docker
+builder does not expand `$MAMBA_USER` in `COPY --chown`, so use the separate legacy files there. They use the numeric
+UID/GID of the base image's `mambauser`, keep the container service on port `8000`, and publish it on host loopback port
+`8803`:
+
+```bash
+docker-compose --project-directory . --file compose.lennart.yaml build
+docker-compose --project-directory . --file compose.lennart.yaml up -d
+docker-compose --project-directory . --file compose.lennart.yaml logs -f virtitta
+```
+
+For a new deployment, copy `.env.lennart.example` to `.env` first. For an existing deployment, retain its `.env` and
+compare it with the example instead of overwriting it.
+
+Use `deploy/apache-virtitta-lennart.conf` for the matching Apache proxy and `deploy/virtitta-import-lennart` for
+automated or manual imports. Do not copy the Lennart Dockerfile over the modern one; both variants are maintained
+side-by-side.
