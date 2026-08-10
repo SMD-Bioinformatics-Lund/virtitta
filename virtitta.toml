@@ -48,7 +48,7 @@ restricted_sample_categories = ["test"]
 lims_root = "data/lims_exports"
 
 [imports]
-clarity_metadata_root = ""
+clarity_metadata_root = "/fs2/seqdata/clarity/done"
 
 [cache]
 outputs_root = "data/output_cache"
@@ -159,8 +159,8 @@ danger_over = 36
 
 [[results_roots]]
 name = "hcv_results"
-linux_path = "/mnt/fs1/results_dev/virpipa/hcv"
-windows_path = "Q:/results_dev/virpipa/hcv"
+linux_path = "/access/virpipa/hcv"
+windows_path = "R:/virpipa/hcv"
 
 # [[results_roots]]
 # name = "hcv_test_results"

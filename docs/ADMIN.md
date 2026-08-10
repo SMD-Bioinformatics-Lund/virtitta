@@ -389,8 +389,10 @@ docker compose run --rm --no-deps virtitta create-user --config /config/virtitta
 docker compose run --rm --no-deps virtitta import-run --config /config/virtitta.toml --run-dir /results/RUN
 ```
 
-The container runs as the non-root user supplied by the micromamba base image. Ensure that user can write the host
-directory configured by `VIRTITTA_DATA` and read all mounted configuration, result, and metadata paths.
+Set `VIRTITTA_UID` and `VIRTITTA_GID` to the owner of the host data directory (`id -u` and `id -g` for the current
+user). Compose runs the container as that non-root identity so it can update SQLite and the mounted cache, cluster, and
+export directories without broadening their permissions. The same identity must be able to read all mounted
+configuration, result, and metadata paths.
 
 ### Apache HTTPS Deployment Under `/virtitta`
 

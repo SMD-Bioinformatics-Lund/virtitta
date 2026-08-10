@@ -3,6 +3,7 @@ services:
     build:
       context: .
     image: ${VIRTITTA_IMAGE:-virtitta:local}
+    user: "${VIRTITTA_UID:-1000}:${VIRTITTA_GID:-1000}"
     restart: unless-stopped
     ports:
       - "${VIRTITTA_LISTEN_ADDRESS:-127.0.0.1}:${VIRTITTA_PORT:-8000}:8000"
