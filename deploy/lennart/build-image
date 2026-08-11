@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+VIRTITTA_LENNART_IMAGE=$(git describe)
+
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_dir=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 image_name=${VIRTITTA_LENNART_IMAGE:-virtitta:lennart}
