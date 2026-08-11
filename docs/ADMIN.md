@@ -426,8 +426,8 @@ cookie_secure = true
 
 `deploy/apache-virtitta.conf` contains the proxy directives to place in the existing TLS-enabled Apache configuration.
 Confirm that `proxy`, `proxy_http`, and `headers` are enabled and run `apache2ctl configtest` before reloading Apache.
-The trailing slashes in the `ProxyPass` directives deliberately strip `/virtitta` before forwarding; Virtitta's
-`app.root_path` adds the prefix back to generated public URLs.
+The `ProxyPass` target preserves `/virtitta`; this must match `app.root_path` so mounted static files and generated
+public URLs use the same prefix.
 
 `VIRTITTA_FORWARDED_ALLOW_IPS=*` is appropriate here only because the published backend port is restricted to host
 loopback and Apache replaces the forwarded scheme. Do not combine this setting with an externally published backend

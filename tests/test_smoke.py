@@ -29,6 +29,7 @@ from virtitta.app import (
     format_value,
     is_public_request_path,
     override_comment_text,
+    request_path_without_root_path,
     table_columns,
 )
 from virtitta.artifact_cache import CACHE_OK, CACHE_STALE, verify_sample_cache
@@ -2997,6 +2998,13 @@ class VirtittaSmokeTests(unittest.TestCase):
             login_route.endpoint(username="reviewer", password="secret", next="/")
         )
         self.assertIn("Path=/virtitta", login_response.headers["set-cookie"])
+
+    def test_root_path_login_is_public_when_proxy_preserves_prefix(self) -> None:
+        path = request_path_without_root_path("/virtitta/login", "/virtitta")
+
+        self.assertEqual(path, "/login")
+        self.assertTrue(is_public_request_path(path))
+        self.assertEqual(request_path_without_root_path("/login", "/virtitta"), "/login")
 
     def test_column_preset_repository_is_scoped_by_user_and_requires_explicit_overwrite(self) -> None:
         config = load_config(self.config_path)

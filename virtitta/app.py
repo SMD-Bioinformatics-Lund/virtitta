@@ -266,6 +266,12 @@ def is_public_request_path(path: str) -> bool:
     return path == "/login" or path.startswith("/static/") or path.startswith("/clusters/public/")
 
 
+def request_path_without_root_path(path: str, root_path: str) -> str:
+    if root_path and (path == root_path or path.startswith(f"{root_path}/")):
+        return path[len(root_path) :] or "/"
+    return path
+
+
 def column_visibility_storage_key(config: Config) -> str:
     payload = {
         "table_columns": config.ui.table_columns,
@@ -1055,7 +1061,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             return await call_next(request)
 
         request.state.current_user = get_user_from_cookie(config, request.cookies.get(config.auth.cookie_name))
-        path = request.url.path
+        path = request_path_without_root_path(request.url.path, config.app.root_path)
         if request.state.current_user is None and not is_public_request_path(path):
             if request.method in {"GET", "HEAD"}:
                 next_url = request.url.path
