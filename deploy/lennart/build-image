@@ -1,13 +1,17 @@
 #!/bin/sh
 set -eu
 
-VIRTITTA_LENNART_IMAGE=$(git describe)
-
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_dir=$(CDPATH= cd -- "$script_dir/../.." && pwd)
-image_name=${VIRTITTA_LENNART_IMAGE:-virtitta:lennart}
+version=${VIRTITTA_IMAGE_VERSION:-$(git -C "$project_dir" describe --tags --always --dirty)}
+versioned_image="virtitta:$version"
+current_image="virtitta:lennart"
 archive_path=${1:-$script_dir/virtitta-image.tar.gz}
 
-docker build --file "$script_dir/Dockerfile" --tag "$image_name" "$project_dir"
-docker save "$image_name" | gzip > "$archive_path"
-printf 'Wrote %s\n' "$archive_path"
+docker build \
+    --file "$script_dir/Dockerfile" \
+    --tag "$versioned_image" \
+    --tag "$current_image" \
+    "$project_dir"
+docker save "$versioned_image" "$current_image" | gzip > "$archive_path"
+printf 'Wrote %s with tags %s and %s\n' "$archive_path" "$versioned_image" "$current_image"

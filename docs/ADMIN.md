@@ -499,6 +499,17 @@ docker-compose up -d
 docker-compose logs -f virtitta
 ```
 
+Each archive contains an immutable `virtitta:<git-version>` tag and the movable `virtitta:lennart` tag. Compose uses
+`virtitta:lennart` by default, so loading a newer archive and running `docker-compose up -d` deploys that build. To pin
+or roll back to a loaded version, set it in `.env`:
+
+```dotenv
+VIRTITTA_IMAGE=virtitta:v0.8.0-6-g9e478e2
+```
+
+Change it back to `virtitta:lennart` to follow subsequently loaded Lennart builds. `VIRTITTA_IMAGE_VERSION` may be set
+when running `build-image` to override the version derived from `git describe --tags --always --dirty`.
+
 Use `./import-run --run-dir /access/virpipa/hcv/RUN` for manual imports and configure the existing `.sqlimport` runner
 to call `/data/bnf/dev/jonas/hcv/virtitta-docker/import-run`. The matching Apache directives are in `apache.conf`.
 
