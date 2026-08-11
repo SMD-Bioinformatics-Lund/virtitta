@@ -22,6 +22,10 @@ services:
         target: ${VIRTITTA_RESULTS_CONTAINER_ROOT:-/access/virpipa/hcv}
         read_only: true
       - type: bind
+        source: /media/isilon/backup_hopper/results/virpipa
+        target: /media/isilon/backup_hopper/results/virpipa
+        read_only: true
+      - type: bind
         source: ${VIRTITTA_CLARITY_ROOT:-./data}
         target: ${VIRTITTA_CLARITY_CONTAINER_ROOT:-/fs2/seqdata/clarity/done}
         read_only: true
