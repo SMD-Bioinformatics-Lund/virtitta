@@ -10,3 +10,4 @@ data/
 
 .env
 *.tar.gz
+deploy/lennart/virtitta-image.tag

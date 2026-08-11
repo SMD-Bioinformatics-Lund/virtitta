@@ -494,14 +494,14 @@ sudo chown -R "$(id -u):$(id -g)" data
 Load and start the transferred image:
 
 ```bash
-gzip -dc virtitta-image.tar.gz | docker load
-docker-compose up -d
+./deploy-image
 docker-compose logs -f virtitta
 ```
 
-Each archive contains an immutable `virtitta:<git-version>` tag and the movable `virtitta:lennart` tag. Compose uses
-`virtitta:lennart` by default, so loading a newer archive and running `docker-compose up -d` deploys that build. To pin
-or roll back to a loaded version, set it in `.env`:
+`build-image` writes `virtitta-image.tar.gz` plus `virtitta-image.tag`. The deployment script validates the companion
+tag, loads the archive, updates only `VIRTITTA_IMAGE` in the existing `.env`, and recreates the service. Consequently,
+`docker ps` shows the full version tag. Each archive also contains the movable `virtitta:lennart` tag. To pin or roll
+back to any loaded version, set it in `.env` and run `docker-compose up -d`:
 
 ```dotenv
 VIRTITTA_IMAGE=virtitta:v0.8.0-6-g9e478e2

@@ -1,0 +1,57 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+archive_path=${1:-$script_dir/virtitta-image.tar.gz}
+case "$archive_path" in
+    *.tar.gz) tag_path=${archive_path%.tar.gz}.tag ;;
+    *) tag_path=$archive_path.tag ;;
+esac
+env_path=$script_dir/.env
+
+if [ ! -f "$archive_path" ]; then
+    printf 'Image archive not found: %s\n' "$archive_path" >&2
+    exit 1
+fi
+if [ ! -f "$tag_path" ]; then
+    printf 'Image tag file not found: %s\n' "$tag_path" >&2
+    exit 1
+fi
+if [ ! -f "$env_path" ]; then
+    printf 'Deployment environment not found: %s\n' "$env_path" >&2
+    exit 1
+fi
+
+image_name=$(sed -n '1p' "$tag_path")
+case "$image_name" in
+    virtitta:*) image_version=${image_name#virtitta:} ;;
+    *) image_version= ;;
+esac
+case "$image_version" in
+    ''|*[!A-Za-z0-9_.-]*)
+        printf 'Invalid Virtitta image tag in %s: %s\n' "$tag_path" "$image_name" >&2
+        exit 1
+        ;;
+esac
+
+gzip -dc "$archive_path" | docker load
+
+temp_env=$env_path.tmp.$$
+trap 'rm -f "$temp_env"' EXIT HUP INT TERM
+cp -p "$env_path" "$temp_env"
+if grep -q '^VIRTITTA_IMAGE=' "$temp_env"; then
+    sed -i "s|^VIRTITTA_IMAGE=.*|VIRTITTA_IMAGE=$image_name|" "$temp_env"
+else
+    printf '\nVIRTITTA_IMAGE=%s\n' "$image_name" >> "$temp_env"
+fi
+mv "$temp_env" "$env_path"
+trap - EXIT HUP INT TERM
+
+cd "$script_dir"
+if docker compose version >/dev/null 2>&1; then
+    docker compose up -d
+else
+    docker-compose up -d
+fi
+
+printf 'Deployed %s\n' "$image_name"
