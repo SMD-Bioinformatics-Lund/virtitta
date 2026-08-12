@@ -469,39 +469,39 @@ archive instead of building it on Lennart:
 
 ```bash
 ./deploy/lennart/build-image
-rsync -a deploy/lennart/ jonas@MTLUCMDS1:/data/bnf/dev/jonas/hcv/virtitta-docker/
 ```
 
-Everything needed at runtime is now contained in that server directory: `docker-compose.yml`, `.env`, `virtitta.toml`,
-the image archive, the import wrapper, the Apache snippet, and persistent `data/`. On a new deployment, create `.env`
-and `data/` once:
+The build and tracked Lennart `.env` are transferred to `/data/bnf/dev/jonas/hcv/virtitta-docker`. Its persistent
+data directory is `/data/bnf/appdata/virtitta`:
 
 ```bash
 cd /data/bnf/dev/jonas/hcv/virtitta-docker
-cp .env.example .env
-mkdir -p data
 ```
 
-For an existing deployment, retain `.env` and `data/` when updating the other files. Set `VIRTITTA_UID` and
-`VIRTITTA_GID` to the numeric owner that should manage the data, then make the existing database and directories match:
+The configured `VIRTITTA_UID` and `VIRTITTA_GID` must match the owner that manages the data:
 
 ```bash
 id -u
 id -g
-sudo chown -R "$(id -u):$(id -g)" data
+sudo chown -R 1009:1004 /data/bnf/appdata/virtitta
 ```
 
-Load and start the transferred image:
+Load and deploy the transferred image:
 
 ```bash
 ./deploy-image
 docker-compose logs -f virtitta
 ```
 
+Install `virtitta.service` under `/etc/systemd/system/` before the first deployment. Its working directory is
+`/var/www/virtitta`; systemd owns subsequent service start, stop, and restart operations. Without the unit,
+`deploy-image` falls back to `docker-compose up -d`.
+
 `build-image` writes `virtitta-image.tar.gz` plus `virtitta-image.tag`. The deployment script validates the companion
-tag, loads the archive, updates only `VIRTITTA_IMAGE` in the existing `.env`, and recreates the service. Consequently,
+tag, loads the archive, updates only `VIRTITTA_IMAGE` in the staging `.env`, and copies `docker-compose.yml`, `.env`,
+`virtitta.toml`, `import-run`, and `run-command` to `/var/www/virtitta`. It then restarts the service. Consequently,
 `docker ps` shows the full version tag. Each archive also contains the movable `virtitta:lennart` tag. To pin or roll
-back to any loaded version, set it in `.env` and run `docker-compose up -d`:
+back to any loaded version, set it in `/var/www/virtitta/.env` and run `sudo systemctl restart virtitta`:
 
 ```dotenv
 VIRTITTA_IMAGE=virtitta:v0.8.0-6-g9e478e2
@@ -511,7 +511,7 @@ Change it back to `virtitta:lennart` to follow subsequently loaded Lennart build
 when running `build-image` to override the version derived from `git describe --tags --always --dirty`.
 
 Use `./import-run --run-dir /access/virpipa/hcv/RUN` for manual imports and configure the existing `.sqlimport` runner
-to call `/data/bnf/dev/jonas/hcv/virtitta-docker/import-run`. The matching Apache directives are in `apache.conf`.
+to call `/var/www/virtitta/import-run`. The matching Apache directives are in `apache.conf`.
 
 The directory's `docker-compose.yml` applies `seccomp=unconfined` only to Virtitta. This is required because the old
 profile returns `EPERM` for syscalls unknown to Docker 18.09, preventing Micromamba environment activation. The

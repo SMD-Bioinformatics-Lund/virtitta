@@ -22,4 +22,5 @@ printf '%s\n' "$versioned_image" > "$tag_path"
 printf 'Wrote %s and %s with tags %s and %s\n' \
     "$archive_path" "$tag_path" "$versioned_image" "$current_image"
 
-rsync -v "${script_dir}/"* lennart:/data/bnf/dev/jonas/hcv/virtitta-docker/
+rsync -v "${script_dir}/"* "$script_dir/.env" \
+    lennart:/data/bnf/dev/jonas/hcv/virtitta-docker/

@@ -8,6 +8,7 @@ case "$archive_path" in
     *) tag_path=$archive_path.tag ;;
 esac
 env_path=$script_dir/.env
+runtime_dir=/var/www/virtitta
 
 if [ ! -f "$archive_path" ]; then
     printf 'Image archive not found: %s\n' "$archive_path" >&2
@@ -47,10 +48,21 @@ fi
 mv "$temp_env" "$env_path"
 trap - EXIT HUP INT TERM
 
-cd "$script_dir"
-if docker compose version >/dev/null 2>&1; then
-    docker compose up -d
+sudo install -d "$runtime_dir"
+sudo install -m 0644 \
+    "$script_dir/docker-compose.yml" \
+    "$script_dir/virtitta.toml" \
+    "$env_path" \
+    "$runtime_dir/"
+sudo install -m 0755 \
+    "$script_dir/import-run" \
+    "$script_dir/run-command" \
+    "$runtime_dir/"
+
+if systemctl cat virtitta.service >/dev/null 2>&1; then
+    sudo systemctl restart virtitta.service
 else
+    cd "$runtime_dir"
     docker-compose up -d
 fi
 

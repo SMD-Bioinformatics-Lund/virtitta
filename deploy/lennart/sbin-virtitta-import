@@ -10,11 +10,10 @@ if [ "$#" -ne 2 ] || [ "$1" != "--run-dir" ]; then
     exit 2
 fi
 
-cd /data/bnf/dev/jonas/hcv/virtitta-docker
+cd /var/www/virtitta
 
 exec /usr/local/bin/docker-compose run --rm --no-deps \
     virtitta import-run \
     --config /config/virtitta.toml \
     "$@"
-
 

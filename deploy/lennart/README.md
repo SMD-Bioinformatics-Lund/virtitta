@@ -4,16 +4,13 @@ This directory contains the Docker deployment for the legacy Lennart host.
 
 ## Initial setup
 
-Copy these files to `/data/bnf/dev/jonas/hcv/virtitta-docker`, then configure the host paths and container UID/GID:
+The transfer directory on Lennart is `/data/bnf/dev/jonas/hcv/virtitta-docker`. The tracked `.env` contains Lennart's host paths and container UID/GID; review it before the first deployment:
 
 ```sh
-cp .env.example .env
-mkdir -p data
 $EDITOR .env
-docker-compose config
 ```
 
-The directory selected by `VIRTITTA_DATA` must be writable by `VIRTITTA_UID:VIRTITTA_GID`. Add `apache.conf` to the existing TLS virtual host and reload Apache.
+Set `VIRTITTA_DATA` to an absolute persistent-data path writable by `VIRTITTA_UID:VIRTITTA_GID`. Add `apache.conf` to the existing TLS virtual host and reload Apache. Install `virtitta.service` under `/etc/systemd/system/`, then run `systemctl daemon-reload` and enable it.
 
 ## Deploy a build
 
@@ -23,21 +20,21 @@ On the development machine:
 ./deploy/lennart/build-image
 ```
 
-This builds a versioned image and copies the deployment files to Lennart. On Lennart:
+This builds a versioned image and copies the deployment bundle to Lennart. On Lennart:
 
 ```sh
 cd /data/bnf/dev/jonas/hcv/virtitta-docker
 ./deploy-image
 ```
 
-`deploy-image` loads the archive, records its full tag in `.env`, and recreates the service. If systemd owns the Compose lifecycle, replace its final `docker-compose up -d` action with a restart of `virtitta.service`.
+`deploy-image` loads the archive, records its full tag in `.env`, and copies only the live Compose files to `/var/www/virtitta`. It restarts `virtitta.service` when installed, otherwise it runs `docker-compose up -d`.
 
 ## Operations
 
 ```sh
-docker-compose ps
+sudo systemctl status virtitta
+sudo systemctl restart virtitta
 docker-compose logs --tail=200 virtitta
-docker-compose restart virtitta
 ./import-run --run-dir /access/virpipa/hcv/RUN_NAME
 ```
 
