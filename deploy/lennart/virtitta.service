@@ -1,0 +1,22 @@
+# /etc/systemd/system/virtitta.service
+[Unit]
+Description=Virtitta Docker Compose service
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/var/www/virtitta
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/var/www/virtitta
+
+ExecStart=/usr/local/bin/docker-compose up -d --no-build
+ExecStop=/usr/local/bin/docker-compose stop
+ExecReload=/usr/local/bin/docker-compose restart
+
+TimeoutStartSec=0
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
+

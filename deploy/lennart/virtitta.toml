@@ -1,7 +1,8 @@
 [app]
 title = "Virtitta"
-host = "0.0.0.0"
+host = "127.0.0.1"
 port = 5812
+root_path = "/virtitta"
 
 [database]
 path = "data/virtitta.sqlite3"
@@ -18,7 +19,7 @@ igv_js_url = "/static/igv.min.js"
 enabled = true
 output_root = "data/clusters"
 grapetree_url = "http://mtlucmds1.lund.skane.se/grapetree/"
-public_base_url = ""
+public_base_url = "https://mtlucmds1.lund.skane.se/virtitta"
 max_concurrent_jobs = 1
 timeout_seconds = 3600
 input_output_key = "iupac_fasta"
@@ -58,7 +59,7 @@ enabled = true
 provider = "local"
 session_days = 7
 cookie_name = "virtitta_session"
-cookie_secure = false
+cookie_secure = true
 pbkdf2_iterations = 600000
 
 [ui]

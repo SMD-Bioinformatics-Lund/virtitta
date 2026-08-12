@@ -2,6 +2,7 @@
 title = "Virtitta"
 host = "127.0.0.1"
 port = 8000
+root_path = ""
 
 [database]
 path = "data/virtitta.sqlite3"

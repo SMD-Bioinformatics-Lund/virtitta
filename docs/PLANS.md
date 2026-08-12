@@ -11,25 +11,6 @@ the same change. Keep entries short enough to revisit and prune.
 
 ## Open Plans
 
-### Deployment And Packaging
-
-Goal: move Virtitta from local development toward a web-server deployment for colleague feedback, then later to a
-containerized deployment.
-
-Next steps:
-
-- inspect the current old web-server Virtitta instance
-- document how the current instance is launched, proxied, configured, and updated
-- prepare a short-term micromamba deployment recipe:
-  - `environment.yml`
-  - systemd service
-  - reverse proxy with HTTPS
-  - `auth.enabled = true`
-  - `auth.cookie_secure = true`
-- add a reproducible dependency lock strategy before wider deployment
-- later build a slim Python container image
-- mount config, database, cache/export directories, and result roots into the container
-
 ### LDAP Or AD Authentication
 
 Goal: support institutional authentication without changing Virtitta's route permissions.
@@ -78,6 +59,12 @@ Next steps:
 - keep at least one low-level ASGI test if it catches middleware redirects clearly
 
 ## Implemented Plans
+
+### Docker And Apache Deployment
+
+Added a reusable micromamba-based container with standalone Docker Compose operation, one-shot CLI commands, external
+configuration and data mounts, configurable application root paths, an Apache `/virtitta` proxy example, and a thin
+wrapper for the existing `.sqlimport` runner.
 
 ### Isolate Clustering V1
 

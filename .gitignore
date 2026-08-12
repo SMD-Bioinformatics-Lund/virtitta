@@ -8,3 +8,7 @@ dist/
 build/
 data/
 
+.env
+!deploy/lennart/.env
+*.tar.gz
+deploy/lennart/virtitta-image.tag

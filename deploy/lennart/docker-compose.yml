@@ -1,0 +1,32 @@
+services:
+  virtitta:
+    image: ${VIRTITTA_IMAGE:-virtitta:lennart}
+    user: "${VIRTITTA_UID:-1000}:${VIRTITTA_GID:-1000}"
+    security_opt:
+      - seccomp=unconfined
+    restart: unless-stopped
+    ports:
+      - "${VIRTITTA_LISTEN_ADDRESS:-127.0.0.1}:${VIRTITTA_PORT:-8803}:8000"
+    environment:
+      FORWARDED_ALLOW_IPS: ${VIRTITTA_FORWARDED_ALLOW_IPS:-127.0.0.1}
+    volumes:
+      - type: bind
+        source: ${VIRTITTA_CONFIG:-./virtitta.toml}
+        target: /config/virtitta.toml
+        read_only: true
+      - type: bind
+        source: ${VIRTITTA_DATA:-./data}
+        target: /config/data
+      - type: bind
+        source: ${VIRTITTA_RESULTS_ROOT:?Set VIRTITTA_RESULTS_ROOT}
+        target: ${VIRTITTA_RESULTS_CONTAINER_ROOT:-/access/virpipa/hcv}
+        read_only: true
+      - type: bind
+        source: /media/isilon/backup_hopper/results/virpipa
+        target: /media/isilon/backup_hopper/results/virpipa
+        read_only: true
+      - type: bind
+        source: ${VIRTITTA_CLARITY_ROOT:-./data}
+        target: ${VIRTITTA_CLARITY_CONTAINER_ROOT:-/fs2/seqdata/clarity/done}
+        read_only: true
+    command: ["serve", "--config", "/config/virtitta.toml", "--host", "0.0.0.0", "--port", "8000"]

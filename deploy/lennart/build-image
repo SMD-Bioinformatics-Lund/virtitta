@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_dir=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+version=${VIRTITTA_IMAGE_VERSION:-$(git -C "$project_dir" describe --tags --always --dirty)}
+versioned_image="virtitta:$version"
+current_image="virtitta:lennart"
+archive_path=${1:-$script_dir/virtitta-image.tar.gz}
+case "$archive_path" in
+    *.tar.gz) tag_path=${archive_path%.tar.gz}.tag ;;
+    *) tag_path=$archive_path.tag ;;
+esac
+
+docker build \
+    --file "$script_dir/Dockerfile" \
+    --tag "$versioned_image" \
+    --tag "$current_image" \
+    "$project_dir"
+docker save "$versioned_image" "$current_image" | gzip > "$archive_path"
+printf '%s\n' "$versioned_image" > "$tag_path"
+printf 'Wrote %s and %s with tags %s and %s\n' \
+    "$archive_path" "$tag_path" "$versioned_image" "$current_image"
+
+rsync -v "${script_dir}/"* "$script_dir/.env" \
+    lennart:/data/bnf/dev/jonas/hcv/virtitta-docker/
