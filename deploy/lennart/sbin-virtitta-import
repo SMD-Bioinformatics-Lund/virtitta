@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+if [ "$(id -u)" -ne 0 ]; then
+    exec sudo -n -- /usr/local/sbin/virtitta-import "$@"
+fi
+
+if [ "$#" -ne 2 ] || [ "$1" != "--run-dir" ]; then
+    echo "Usage: virtitta-import --run-dir /access/virpipa/hcv/RUN_NAME" >&2
+    exit 2
+fi
+
+cd /data/bnf/dev/jonas/hcv/virtitta-docker
+
+exec /usr/local/bin/docker-compose run --rm --no-deps \
+    virtitta import-run \
+    --config /config/virtitta.toml \
+    "$@"
+
+
