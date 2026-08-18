@@ -26,6 +26,7 @@ from virtitta.app import (
     cell_style,
     comment_link_label,
     create_app,
+    display_version,
     format_value,
     is_public_request_path,
     override_comment_text,
@@ -116,6 +117,10 @@ def write_test_config(config_path: Path, *, root: Path, db_path: Path, root_path
 
 
 class VirtittaSmokeTests(unittest.TestCase):
+    def test_display_version_uses_docker_tag_format(self) -> None:
+        self.assertEqual(display_version("v0.9.0-1-gccd14b3"), "v0.9.0-1-gccd14b3")
+        self.assertEqual(display_version("0.9.0"), "v0.9.0")
+
     def make_request(
         self,
         app,
@@ -3207,6 +3212,7 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Showing basic viewer help", rendered)
+        self.assertIn("VirPipa run review v", rendered)
         self.assertIn("Main-table headers", rendered)
         self.assertIn("Percentage identity of the main BLAST typing match", rendered)
         self.assertIn('href="http://testserver/help">Help</a>', rendered)

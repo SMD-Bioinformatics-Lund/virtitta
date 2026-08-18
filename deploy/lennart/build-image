@@ -13,6 +13,7 @@ case "$archive_path" in
 esac
 
 docker build \
+    --build-arg "VIRTITTA_VERSION=$version" \
     --file "$script_dir/Dockerfile" \
     --tag "$versioned_image" \
     --tag "$current_image" \

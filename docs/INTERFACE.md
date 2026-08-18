@@ -1,6 +1,7 @@
 # Virtitta Interface Guide
 
 This guide describes the browser interface. Available controls depend on authentication and role settings.
+The upper-left subtitle includes the running Virtitta image version, for example `v0.9.0-1-gccd14b3`.
 
 ## In-App Help
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
@@ -14,6 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from virtitta import __version__
 from virtitta.artifact_cache import CACHE_OFFLINE_UNVERIFIED, resolve_cached_output
 from virtitta.auth import (
     PERMISSION_CATEGORY_UPDATE,
@@ -104,6 +106,14 @@ from virtitta.repository import (
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+def display_version(value: str | None) -> str:
+    version = (value or __version__).strip() or __version__
+    return version if version.startswith("v") else f"v{version}"
+
+
+templates.env.globals["app_version"] = display_version(os.environ.get("VIRTITTA_VERSION"))
 
 DETAIL_FILE_LINKS = [
     ("Main FASTA", "main_fasta"),
