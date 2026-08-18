@@ -874,6 +874,36 @@ button.secondary,
   color: #645b4e;
 }
 
+.distance-matrix-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.distance-matrix {
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+.distance-matrix th,
+.distance-matrix td {
+  border: 1px solid var(--line);
+  padding: 5px 7px;
+  text-align: center;
+}
+
+.distance-matrix td:not(.distance-neutral):not(.distance-unavailable) {
+  background: color-mix(in srgb, #d86b4a calc(var(--distance-intensity) * 75%), var(--panel));
+}
+
+.distance-neutral {
+  background: #eee9df;
+}
+
+.distance-unavailable {
+  background: #c9c9c9;
+  color: #4f4f4f;
+}
+
 .col-hidden {
   display: none;
 }

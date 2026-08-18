@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from virtitta.artifact_cache import get_cached_output_file, is_cacheable_output
+from virtitta.artifact_cache import CACHE_OFFLINE_UNVERIFIED, resolve_cached_output
 from virtitta.auth import (
     PERMISSION_CATEGORY_UPDATE,
     PERMISSION_COMMENT_ADD,
@@ -50,6 +50,17 @@ from virtitta.cluster import (
     write_command_snapshot,
 )
 from virtitta.config import DEFAULT_COLUMN_LABELS, QC_STATUS_OPTIONS, Config, load_config
+from virtitta.distance import (
+    ANALYSIS_TYPE as DISTANCE_ANALYSIS_TYPE,
+    ARTIFACT_RESULT as DISTANCE_RESULT_ARTIFACT,
+    MIN_DISTANCE_SAMPLES,
+    distance_artifact_path,
+    distance_artifacts,
+    distance_config_snapshot,
+    ensure_result_ordering,
+    prepare_distance_files,
+    run_distance_job,
+)
 from virtitta.outputs import (
     effective_output_key,
     effective_output_relname,
@@ -702,6 +713,10 @@ def cluster_job_response(job: dict) -> dict:
     }
 
 
+def job_analysis_type(job: dict) -> str:
+    return json.loads(job.get("config_json") or "{}").get("analysis_type", "cluster")
+
+
 def build_grapetree_url(config: Config, request: Request, job: dict) -> str:
     if not config.cluster.grapetree_url:
         return ""
@@ -753,23 +768,35 @@ def build_fasta_clipboard_content(
     sample_rows: list[dict],
     output_key: str,
     header_id: str = "lid",
+    artifact_sources: set[str] | None = None,
 ) -> str:
     chunks: list[str] = []
     connection = connect(config.database.path)
     try:
         for sample_row in sample_rows:
-            file_path = get_cached_output_file(config, connection, sample_row["sample_run_id"], output_key)
-            if file_path is None:
-                source_key = effective_output_key(output_key, effective_outputs(config, sample_row))
-                if source_key and source_key != output_key:
-                    file_path = get_cached_output_file(config, connection, sample_row["sample_run_id"], source_key)
-            if file_path is None:
+            source_key = effective_output_key(output_key, effective_outputs(config, sample_row)) or output_key
+            resolved = resolve_cached_output(config, connection, sample_row, source_key)
+            if resolved is None:
                 file_path, _ = resolve_output_file(config, sample_row, output_key)
+                source = "live"
+            else:
+                file_path = resolved.path
+                source = resolved.source
+            if artifact_sources is not None:
+                artifact_sources.add(source)
             text = file_path.read_text(encoding="utf-8")
             chunks.append(rewrite_fasta_headers(text, fasta_export_header(sample_row, header_id, output_key)))
     finally:
         connection.close()
     return "".join(chunks)
+
+
+def artifact_response_headers(sources: set[str]) -> dict[str, str]:
+    value = ",".join(sorted(sources or {"live"}))
+    headers = {"X-Virtitta-Artifact-Source": value}
+    if CACHE_OFFLINE_UNVERIFIED in sources:
+        headers["Warning"] = '110 Virtitta "Result root unavailable; serving an unverified cached copy"'
+    return headers
 
 
 def lims_export_filename(sample_rows: list[dict]) -> str:
@@ -1574,9 +1601,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         header_id = header_id if isinstance(header_id, str) and header_id else "lid"
         if header_id not in {"lid", "sample_id"}:
             raise HTTPException(status_code=400, detail="Unsupported FASTA header identifier")
+        artifact_sources = set()
         return Response(
-            content=build_fasta_clipboard_content(config, sample_rows, "export_fasta", header_id),
+            content=build_fasta_clipboard_content(
+                config, sample_rows, "export_fasta", header_id, artifact_sources
+            ),
             media_type="text/plain; charset=utf-8",
+            headers=artifact_response_headers(artifact_sources),
         )
 
     @app.post("/samples/clipboard/iupac-fasta")
@@ -1596,9 +1627,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         header_id = header_id if isinstance(header_id, str) and header_id else "lid"
         if header_id not in {"lid", "sample_id"}:
             raise HTTPException(status_code=400, detail="Unsupported FASTA header identifier")
+        artifact_sources = set()
         return Response(
-            content=build_fasta_clipboard_content(config, sample_rows, "export_iupac_fasta", header_id),
+            content=build_fasta_clipboard_content(
+                config, sample_rows, "export_iupac_fasta", header_id, artifact_sources
+            ),
             media_type="text/plain; charset=utf-8",
+            headers=artifact_response_headers(artifact_sources),
         )
 
     @app.post("/clusters")
@@ -1671,13 +1706,118 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         request.app.state.cluster_executor.submit(run_cluster_job, config, job_id)
         return RedirectResponse(str(request.url_for("cluster_detail", job_id=job_id)), status_code=303)
 
+    @app.post("/distance-matrices")
+    async def create_distance_matrices(
+        request: Request,
+        sample_run_id: list[str] = Form(default=[]),
+        redirect_to: str = Form(default="/"),
+        allow_duplicate_ids: str = Form(default=""),
+        csrf_token: str = Form(default=""),
+    ):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        require_csrf(request, csrf_token)
+        if not config.cluster.enabled:
+            return RedirectResponse(append_warning(redirect_to, "Distance analysis is disabled."), status_code=303)
+        if len(sample_run_id) < MIN_DISTANCE_SAMPLES:
+            return RedirectResponse(
+                append_warning(redirect_to, f"Select at least {MIN_DISTANCE_SAMPLES} samples for distance matrices."),
+                status_code=303,
+            )
+        job_id = secrets.token_urlsafe(12)
+        sample_rows = load_sample_rows(config, sample_run_id, request)
+        if len(sample_rows) < MIN_DISTANCE_SAMPLES:
+            return RedirectResponse(
+                append_warning(redirect_to, f"Select at least {MIN_DISTANCE_SAMPLES} visible samples for distance matrices."),
+                status_code=303,
+            )
+        connection = connect(config.database.path)
+        try:
+            try:
+                sample_records, warning_text = prepare_distance_files(
+                    config, connection, sample_rows, job_id, allow_duplicate_ids=allow_duplicate_ids == "true"
+                )
+                snapshot = distance_config_snapshot(config)
+                commands_path = config.cluster.output_root / distance_artifacts(job_id)["commands"]
+                commands_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            except ClusterError as exc:
+                return RedirectResponse(append_warning(redirect_to, str(exc)), status_code=303)
+            create_cluster_job(
+                connection,
+                {
+                    "id": job_id, "status": "queued", "created_at": utc_now(), "started_at": None,
+                    "completed_at": None, "selected_count": len(sample_rows), "warning_text": warning_text,
+                    "error_text": None, "output_relpath": job_id,
+                    "artifacts_json": json.dumps(distance_artifacts(job_id), sort_keys=True),
+                    "config_json": json.dumps(snapshot, sort_keys=True), "public_token": secrets.token_urlsafe(24),
+                },
+                sample_records,
+            )
+        finally:
+            connection.close()
+        request.app.state.cluster_executor.submit(run_distance_job, config, job_id)
+        return RedirectResponse(str(request.url_for("distance_detail", job_id=job_id)), status_code=303)
+
+    @app.get("/distance-matrices/{job_id}", response_class=HTMLResponse)
+    def distance_detail(request: Request, job_id: str):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        connection = connect(config.database.path)
+        try:
+            job = get_cluster_job(connection, job_id)
+            if job is None or json.loads(job.get("config_json") or "{}").get("analysis_type") != DISTANCE_ANALYSIS_TYPE:
+                raise HTTPException(status_code=404, detail="Distance-matrix job not found")
+            samples = get_cluster_job_samples(connection, job_id)
+        finally:
+            connection.close()
+        result = None
+        if job["status"] == "completed":
+            try:
+                result = ensure_result_ordering(
+                    json.loads(distance_artifact_path(config, job, DISTANCE_RESULT_ARTIFACT).read_text(encoding="utf-8"))
+                )
+            except (ClusterError, json.JSONDecodeError):
+                result = None
+        return templates.TemplateResponse(request, "distance_detail.html", {
+            "request": request, "config": config, "job": job, "samples": samples,
+            "artifacts": json.loads(job.get("artifacts_json") or "{}"), "result": result,
+            "status_url": str(request.url_for("distance_status", job_id=job_id)),
+            "warning_message": "", "notice_message": "",
+        })
+
+    @app.get("/distance-matrices/{job_id}/status")
+    def distance_status(request: Request, job_id: str):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        connection = connect(config.database.path)
+        try:
+            job = get_cluster_job(connection, job_id)
+            if job is None or json.loads(job.get("config_json") or "{}").get("analysis_type") != DISTANCE_ANALYSIS_TYPE:
+                raise HTTPException(status_code=404, detail="Distance-matrix job not found")
+        finally:
+            connection.close()
+        return cluster_job_response(job)
+
+    @app.get("/distance-matrices/{job_id}/artifacts/{artifact_key}")
+    def distance_artifact(request: Request, job_id: str, artifact_key: str):
+        require_permission(request, PERMISSION_EXPORT_READ)
+        connection = connect(config.database.path)
+        try:
+            job = get_cluster_job(connection, job_id)
+            if job is None or json.loads(job.get("config_json") or "{}").get("analysis_type") != DISTANCE_ANALYSIS_TYPE:
+                raise HTTPException(status_code=404, detail="Distance-matrix job not found")
+        finally:
+            connection.close()
+        try:
+            file_path = distance_artifact_path(config, job, artifact_key)
+        except ClusterError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return FileResponse(file_path, filename=file_path.name, media_type="text/plain; charset=utf-8", content_disposition_type="inline")
+
     @app.get("/clusters/{job_id}", response_class=HTMLResponse)
     def cluster_detail(request: Request, job_id: str):
         require_permission(request, PERMISSION_EXPORT_READ)
         connection = connect(config.database.path)
         try:
             job = get_cluster_job(connection, job_id)
-            if job is None:
+            if job is None or job_analysis_type(job) != "cluster":
                 raise HTTPException(status_code=404, detail="Cluster job not found")
             samples = get_cluster_job_samples(connection, job_id)
         finally:
@@ -1706,7 +1846,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             job = get_cluster_job(connection, job_id)
-            if job is None:
+            if job is None or job_analysis_type(job) != "cluster":
                 raise HTTPException(status_code=404, detail="Cluster job not found")
         finally:
             connection.close()
@@ -1718,7 +1858,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             job = get_cluster_job(connection, job_id)
-            if job is None:
+            if job is None or job_analysis_type(job) != "cluster":
                 raise HTTPException(status_code=404, detail="Cluster job not found")
         finally:
             connection.close()
@@ -1744,7 +1884,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         connection = connect(config.database.path)
         try:
             job = get_cluster_job_by_public_token(connection, public_token)
-            if job is None or job["status"] != "completed":
+            if job is None or job_analysis_type(job) != "cluster" or job["status"] != "completed":
                 raise HTTPException(status_code=404, detail="Cluster job not found")
         finally:
             connection.close()
@@ -1776,10 +1916,24 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             sample_row = require_visible_sample(config, request, sample_row)
             comments = get_comments(connection, sample_run_id)
             raw = raw_json_for_sample(sample_row)
+            outputs = effective_outputs(config, sample_row, raw)
+            offline_cached_outputs = []
+            for output_key in config.cache.output_keys:
+                if not effective_output_relname(output_key, outputs):
+                    continue
+                resolved = resolve_cached_output(config, connection, sample_row, output_key)
+                if resolved is not None and resolved.source == CACHE_OFFLINE_UNVERIFIED:
+                    offline_cached_outputs.append(output_key)
         finally:
             connection.close()
 
-        outputs = effective_outputs(config, sample_row, raw)
+        cache_warning = ""
+        if offline_cached_outputs:
+            cache_warning = (
+                "Result storage is unavailable; this page is using unverified cached copies for: "
+                + ", ".join(offline_cached_outputs)
+                + "."
+            )
         igv_url = None
         if config.features.igv and config.igv.enabled:
             try:
@@ -1812,7 +1966,9 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "resistance_mutations": resistance_mutations,
                 "resistance_analysis_present": bool(resistance_summary.get("analysis_present")),
                 "resistance_has_calls": bool(resistance_summary.get("has_resistance")),
-                "warning_message": warning if isinstance(warning, str) else "",
+                "warning_message": " ".join(
+                    item for item in (warning if isinstance(warning, str) else "", cache_warning) if item
+                ),
                 "notice_message": notice if isinstance(notice, str) else "",
                 "can_delete_comment": lambda comment: can_delete_comment(request, comment),
                 "permissions": {
@@ -1950,21 +2106,24 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.get("/samples/{sample_run_id}/files/{output_key}")
     def sample_file(request: Request, sample_run_id: str, output_key: str):
         require_permission(request, PERMISSION_EXPORT_READ)
-        cached_path = None
+        resolved = None
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
             sample_row = require_visible_sample(config, request, sample_row)
-            if is_cacheable_output(config, output_key):
-                cached_path = get_cached_output_file(config, connection, sample_run_id, output_key)
+            resolved = resolve_cached_output(config, connection, sample_row, output_key)
         finally:
             connection.close()
 
         outputs = effective_outputs(config, sample_row)
-        if cached_path is not None:
-            return FileResponse(cached_path, filename=outputs.get(output_key) or cached_path.name)
+        if resolved is not None:
+            return FileResponse(
+                resolved.path,
+                filename=outputs.get(output_key) or resolved.path.name,
+                headers=artifact_response_headers({resolved.source}),
+            )
         file_path, relname = resolve_output_file(config, sample_row, output_key)
-        return FileResponse(file_path, filename=relname)
+        return FileResponse(file_path, filename=relname, headers=artifact_response_headers({"live"}))
 
     @app.get("/samples/{sample_run_id}/files/{output_key}/view")
     def sample_file_view(request: Request, sample_run_id: str, output_key: str):
@@ -1972,23 +2131,23 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if output_key not in VIEWABLE_DETAIL_OUTPUT_KEYS:
             raise HTTPException(status_code=404, detail="Output is not available for browser viewing")
 
-        cached_path = None
+        resolved = None
         connection = connect(config.database.path)
         try:
             sample_row = get_sample(connection, sample_run_id)
             sample_row = require_visible_sample(config, request, sample_row)
-            if is_cacheable_output(config, output_key):
-                cached_path = get_cached_output_file(config, connection, sample_run_id, output_key)
+            resolved = resolve_cached_output(config, connection, sample_row, output_key)
         finally:
             connection.close()
 
         outputs = effective_outputs(config, sample_row)
-        if cached_path is not None:
+        if resolved is not None:
             return FileResponse(
-                cached_path,
-                filename=outputs.get(output_key) or cached_path.name,
+                resolved.path,
+                filename=outputs.get(output_key) or resolved.path.name,
                 media_type=DETAIL_VIEW_MEDIA_TYPE,
                 content_disposition_type="inline",
+                headers=artifact_response_headers({resolved.source}),
             )
         file_path, relname = resolve_output_file(config, sample_row, output_key)
         return FileResponse(
@@ -1996,6 +2155,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             filename=relname,
             media_type=DETAIL_VIEW_MEDIA_TYPE,
             content_disposition_type="inline",
+            headers=artifact_response_headers({"live"}),
         )
 
     @app.get("/samples/{sample_run_id}/webigv", response_class=HTMLResponse)

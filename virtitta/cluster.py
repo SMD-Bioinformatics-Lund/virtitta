@@ -9,7 +9,6 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from virtitta.artifact_cache import get_cached_output_file
 from virtitta.config import Config
 from virtitta.outputs import effective_output_relname, safe_relative_path
 from virtitta.repository import (
@@ -100,10 +99,6 @@ def artifact_path(config: Config, job: dict, artifact_key: str) -> Path:
 
 
 def _sample_output_file(config: Config, connection, sample_row: dict, output_key: str) -> Path:
-    cached_path = get_cached_output_file(config, connection, sample_row["sample_run_id"], output_key)
-    if cached_path is not None:
-        return cached_path
-
     raw = json.loads(sample_row["raw_json"])
     relname = effective_output_relname(output_key, raw.get("outputs", {}))
     if not relname:

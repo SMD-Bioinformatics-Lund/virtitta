@@ -37,6 +37,13 @@ from virtitta.auth import create_login_session, hash_password
 from virtitta.cli import build_parser
 from virtitta.cluster import ClusterError, cluster_artifacts, prepare_cluster_files, run_cluster_job
 from virtitta.config import load_config
+from virtitta.distance import (
+    ANALYSIS_TYPE as DISTANCE_ANALYSIS_TYPE,
+    distance_artifacts,
+    distance_config_snapshot,
+    prepare_distance_files,
+    run_distance_job,
+)
 from virtitta.importer import MANUAL_FAILED_RUN_NAME, import_run, import_run_with_report, import_sample
 from virtitta.repository import (
     add_comment,
@@ -2139,6 +2146,23 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("comment_count", metadata)
         self.assertIn("LID002\tLID002\tSAMPLE002\t2026-04-08\t2026-04-08\t\t\tunreviewed\t\t1a", metadata)
 
+    def test_prepare_cluster_files_uses_live_fasta_instead_of_stale_output_cache(self) -> None:
+        self.enable_cluster()
+        self.add_second_sample_summary()
+        self.add_sample_summary(sample_id="SAMPLE003", lid="LID003", tree_id="LID003-0.15-iupac")
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        (self.sample_dir / "SAMPLE001-0.15-iupac.fasta").write_text(">SAMPLE001\nTTTT\n", encoding="utf-8")
+        conn = connect(config.database.path)
+        try:
+            rows = list_samples(conn)
+            prepare_cluster_files(config, conn, rows, "live-cluster")
+        finally:
+            conn.close()
+
+        prepared_input = (config.cluster.output_root / "live-cluster/input.raw.fasta").read_text(encoding="utf-8")
+        self.assertIn(">LID001\nTTTT\n", prepared_input)
+
     def test_prepare_cluster_files_requires_three_samples(self) -> None:
         self.enable_cluster()
         self.add_second_sample_summary(subtype="1a")
@@ -2831,7 +2855,7 @@ class VirtittaSmokeTests(unittest.TestCase):
             ">SAMPLE001\nACGT\n",
         )
 
-    def test_fasta_clipboard_content_reads_cached_output(self) -> None:
+    def test_fasta_clipboard_content_refreshes_stale_cached_output(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
         (self.sample_dir / "SAMPLE001.fasta").write_text(">REMOTE\nTTTT\n", encoding="utf-8")
@@ -2845,7 +2869,17 @@ class VirtittaSmokeTests(unittest.TestCase):
         assert sample is not None
         self.assertEqual(
             build_fasta_clipboard_content(config, [sample], "export_fasta"),
-            ">LID001\nACGT\n",
+            ">LID001\nTTTT\n",
+        )
+        conn = connect(config.database.path)
+        try:
+            entry = get_output_cache_entry(conn, "SAMPLE001_fixture_run", "main_fasta")
+        finally:
+            conn.close()
+        assert entry is not None
+        self.assertEqual(
+            (config.cache.outputs_root / entry["cached_relpath"]).read_text(encoding="utf-8"),
+            ">REMOTE\nTTTT\n",
         )
 
     def test_reimport_replaces_cached_output_path_without_leaving_old_file(self) -> None:
@@ -2898,6 +2932,19 @@ class VirtittaSmokeTests(unittest.TestCase):
             Path(response.path).read_text(encoding="utf-8"),
             "cached image",
         )
+        self.assertEqual(response.headers["x-virtitta-artifact-source"], "cache-offline-unverified")
+        self.assertIn("unverified cached copy", response.headers["warning"])
+
+    def test_sample_file_serves_current_cache_with_source_header(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/files/{output_key}")
+        response = route.endpoint(self.make_request(app), "SAMPLE001_fixture_run", "main_fasta")
+
+        self.assertEqual(response.headers["x-virtitta-artifact-source"], "cache-current")
+        self.assertNotIn("warning", response.headers)
 
     def test_sample_file_view_serves_blast_inline(self) -> None:
         config = load_config(self.config_path)
@@ -2954,6 +3001,17 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("SAMPLE001.fasta.blast", rendered)
         self.assertNotIn("/samples/SAMPLE001_fixture_run/files/main_cram/view", rendered)
         self.assertNotIn("/samples/SAMPLE001_fixture_run/files/display_rug_kde_plot/view", rendered)
+
+    def test_sample_detail_warns_when_it_uses_an_offline_cached_artifact(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        (self.sample_dir / "SAMPLE001.fasta").unlink()
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}")
+
+        response = route.endpoint(self.make_request(app), "SAMPLE001_fixture_run")
+
+        self.assertIn("using unverified cached copies for: main_fasta", response.body.decode("utf-8"))
 
     def test_auth_enabled_redirects_anonymous_user_to_login(self) -> None:
         self.enable_auth()
@@ -3733,6 +3791,19 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.body.decode("utf-8"), ">LID001\nACGT\n")
+        self.assertEqual(response.headers["x-virtitta-artifact-source"], "cache-current")
+
+    def test_bulk_fasta_clipboard_export_marks_offline_cache_unverified(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        (self.sample_dir / "SAMPLE001.fasta").unlink()
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/clipboard/fasta")
+        response = asyncio.run(route.endpoint(self.make_request(app, method="POST"), sample_run_id=["SAMPLE001_fixture_run"]))
+
+        self.assertEqual(response.body.decode("utf-8"), ">LID001\nACGT\n")
+        self.assertEqual(response.headers["x-virtitta-artifact-source"], "cache-offline-unverified")
+        self.assertIn("unverified cached copy", response.headers["warning"])
 
     def test_bulk_iupac_fasta_clipboard_export_returns_text(self) -> None:
         config = load_config(self.config_path)
@@ -4013,6 +4084,106 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.assertIsNone(sample)
         self.assertEqual(runs, [])
+
+    def test_distance_job_builds_both_matrices_with_one_mafft_and_no_iqtree(self) -> None:
+        mafft, iqtree = self.write_fake_cluster_tools()
+        self.enable_cluster(mafft_command=str(mafft), iqtree_command=str(iqtree), five_prime_trim=0)
+        self.add_second_sample_summary(sequence="ACRTAAAA")
+        (self.sample_dir / "SAMPLE001.fasta").write_text(">majority-one\nACGTAAAA\n", encoding="utf-8")
+        (self.sample_dir / "SAMPLE001-0.15-iupac.fasta").write_text(">iupac-one\nACGTAAAA\n", encoding="utf-8")
+        (self.run_dir / "SAMPLE002/results/SAMPLE002.fasta").write_text(">majority-two\nATGTAAAA\n", encoding="utf-8")
+        for sample_id, fasta_id in (("SAMPLE001", "majority-one"), ("SAMPLE002", "majority-two")):
+            sample_results = self.run_dir / sample_id / "results"
+            bed_name = f"{sample_id}-coverage-1x.bed"
+            (sample_results / bed_name).write_text(f"{fasta_id}\t0\t8\n", encoding="utf-8")
+            summary_path = sample_results / f"{sample_id}_qc_summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["outputs"]["coverage_1x_bed"] = bed_name
+            summary_path.write_text(json.dumps(summary), encoding="utf-8")
+        mafft_count = self.tmp_path / "mafft-count"
+        mafft.write_text(
+            "#!/usr/bin/env python3\n"
+            "import pathlib, sys\n"
+            f"count = pathlib.Path({str(mafft_count)!r})\n"
+            "count.write_text(count.read_text() + 'x' if count.exists() else 'x')\n"
+            "print(pathlib.Path(sys.argv[-1]).read_text(), end='')\n",
+            encoding="utf-8",
+        )
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            rows = list_samples(conn)
+            sample_records, warning = prepare_distance_files(config, conn, rows, "distance1")
+            create_cluster_job(conn, {
+                "id": "distance1", "status": "queued", "created_at": utc_now(), "started_at": None,
+                "completed_at": None, "selected_count": 2, "warning_text": warning, "error_text": None,
+                "output_relpath": "distance1", "artifacts_json": json.dumps(distance_artifacts("distance1")),
+                "config_json": json.dumps(distance_config_snapshot(config)), "public_token": "not-public",
+            }, sample_records)
+        finally:
+            conn.close()
+        run_distance_job(config, "distance1")
+        conn = connect(config.database.path)
+        try:
+            job = get_cluster_job(conn, "distance1")
+        finally:
+            conn.close()
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(mafft_count.read_text(), "x")
+        self.assertFalse((config.cluster.output_root / "distance1/iqtree.treefile").exists())
+        result = json.loads((config.cluster.output_root / "distance1/distance-matrices.json").read_text())
+        self.assertEqual(result["analysis_type"], DISTANCE_ANALYSIS_TYPE)
+        self.assertEqual(result["coverage"]["threshold"], ">=1x")
+        self.assertEqual({item["source"] for item in result["coverage"]["samples"].values()}, {"supplied"})
+        self.assertEqual(result["iupac"]["ordering"]["method"], "UPGMA")
+        self.assertEqual(result["majority"]["ordering"]["metric"], "total_events")
+        self.assertEqual(result["iupac"]["cells"][0][1]["total_events"], 0)
+        self.assertEqual(result["majority"]["cells"][0][1]["total_events"], 1)
+        for filename in ("iupac.counts.tsv", "iupac.details.tsv", "majority.counts.tsv", "majority.details.tsv"):
+            self.assertTrue((config.cluster.output_root / "distance1" / filename).exists())
+        self.assertTrue((config.cluster.output_root / "distance1/coverage-masks.bed").exists())
+
+    def test_distance_routes_and_result_controls_are_separate_from_public_artifacts(self) -> None:
+        self.enable_cluster()
+        config = load_config(self.config_path)
+        app = create_app(self.config_path)
+        paths = {getattr(route, "path", None) for route in app.routes}
+        self.assertIn("/distance-matrices", paths)
+        self.assertIn("/distance-matrices/{job_id}", paths)
+        self.assertIn("/distance-matrices/{job_id}/status", paths)
+        self.assertIn("/distance-matrices/{job_id}/artifacts/{artifact_key}", paths)
+        self.assertNotIn("/distance-matrices/public/{public_token}/{artifact_key}", paths)
+
+        output_dir = config.cluster.output_root / "distance-view"
+        output_dir.mkdir(parents=True)
+        result = {
+            "analysis_type": DISTANCE_ANALYSIS_TYPE, "max_total_events": 3,
+            "iupac": {"identifiers": ["A", "B"], "cells": [[{"substitutions": 0, "indel_events": 0, "total_events": 0, "compared_bases": 4}, {"substitutions": 0, "indel_events": 0, "total_events": 0, "compared_bases": 0}], [{"substitutions": 0, "indel_events": 0, "total_events": 0, "compared_bases": 0}, {"substitutions": 0, "indel_events": 0, "total_events": 0, "compared_bases": 4}]]},
+            "majority": {"identifiers": ["A", "B"], "cells": [[{"substitutions": 0, "indel_events": 0, "total_events": 0, "compared_bases": 4}, {"substitutions": 3, "indel_events": 0, "total_events": 3, "compared_bases": 4}], [{"substitutions": 3, "indel_events": 0, "total_events": 3, "compared_bases": 4}, {"substitutions": 0, "indel_events": 0, "total_events": 0, "compared_bases": 4}]]},
+        }
+        (output_dir / "distance-matrices.json").write_text(json.dumps(result))
+        conn = connect(config.database.path)
+        try:
+            create_cluster_job(conn, {
+                "id": "distance-view", "status": "completed", "created_at": utc_now(), "started_at": None,
+                "completed_at": utc_now(), "selected_count": 2, "warning_text": "", "error_text": None,
+                "output_relpath": "distance-view", "artifacts_json": json.dumps({"result_json": "distance-view/distance-matrices.json"}),
+                "config_json": json.dumps(distance_config_snapshot(config)), "public_token": "distance-token",
+            }, [])
+        finally:
+            conn.close()
+        route = next(route for route in app.routes if getattr(route, "path", None) == "/distance-matrices/{job_id}")
+        rendered = route.endpoint(self.make_request(app), "distance-view").body.decode()
+        self.assertIn("15% IUPAC", rendered)
+        self.assertIn("Majority consensus", rendered)
+        self.assertIn("data-matrix-display", rendered)
+        self.assertIn("data-matrix-order", rendered)
+        self.assertIn("UPGMA", rendered)
+        self.assertIn("distance-unavailable", rendered)
+        self.assertIn(">-1</span>", rendered)
+        self.assertIn("No bases compared", rendered)
+        self.assertIn("--distance-intensity: 1.0", rendered)
 
 
 if __name__ == "__main__":

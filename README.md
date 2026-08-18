@@ -329,7 +329,7 @@ Save location behavior:
   - the currently visible main table
   - selected FASTA records, with LID or sample ID headers
   - selected 15% IUPAC FASTA records, with LID or sample ID headers
-- the canonical FASTA outputs and rug/KDE image are served from the local output cache when present
+- the canonical FASTA outputs and rug/KDE image use a freshness-aware local cache, with explicit unverified fallback when result storage is offline
 
 ## Next Work
 

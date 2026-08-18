@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
 import re
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from virtitta.config import Config
@@ -21,6 +25,16 @@ CACHE_STALE = "stale"
 CACHE_MISSING_CACHE = "missing-cache"
 CACHE_MISSING_REMOTE = "missing-remote"
 CACHE_UNCONFIGURED = "unconfigured"
+CACHE_CURRENT = "cache-current"
+CACHE_OFFLINE_UNVERIFIED = "cache-offline-unverified"
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ResolvedArtifact:
+    path: Path
+    source: str
 
 
 def is_cacheable_output(config: Config, output_key: str) -> bool:
@@ -55,16 +69,60 @@ def cached_file_path(config: Config, cached_relpath: str) -> Path:
     return config.cache.outputs_root / relpath
 
 
-def get_cached_output_file(config: Config, connection, sample_run_id: str, output_key: str) -> Path | None:
+def resolve_cached_output(config: Config, connection, sample_row: dict, output_key: str) -> ResolvedArtifact | None:
     if not is_cacheable_output(config, output_key):
         return None
-    entry = get_output_cache_entry(connection, sample_run_id, output_key)
-    if entry is None:
-        return None
-    path = cached_file_path(config, entry["cached_relpath"])
-    if not path.is_file():
-        return None
-    return path
+
+    entry = get_output_cache_entry(connection, sample_row["sample_run_id"], output_key)
+    cached_path = cached_file_path(config, entry["cached_relpath"]) if entry is not None else None
+    cached_exists = cached_path is not None and cached_path.is_file()
+    resolved = remote_output_path(config, sample_row, output_key)
+    remote_path, relname = resolved if resolved is not None else (None, None)
+    try:
+        remote_stat = remote_path.stat() if remote_path is not None else None
+        remote_exists = remote_path is not None and remote_path.is_file()
+    except OSError:
+        remote_stat = None
+        remote_exists = False
+
+    if remote_exists and remote_stat is not None:
+        current = (
+            entry is not None
+            and cached_exists
+            and relname == entry["remote_relpath"]
+            and remote_stat.st_size == entry["remote_size"]
+            and remote_stat.st_mtime_ns == entry["remote_mtime_ns"]
+        )
+        if current:
+            return ResolvedArtifact(cached_path, CACHE_CURRENT)
+        try:
+            refreshed = _cache_output(config, connection, sample_row, output_key, remote_path, relname, remote_stat)
+        except OSError:
+            try:
+                still_available = remote_path.is_file()
+            except OSError:
+                still_available = False
+            if still_available or not cached_exists:
+                raise
+            logger.warning(
+                "Serving unverified cached artifact after source became unavailable: sample_run_id=%s output_key=%s source=%s",
+                sample_row["sample_run_id"], output_key, remote_path,
+            )
+            return ResolvedArtifact(cached_path, CACHE_OFFLINE_UNVERIFIED)
+        connection.commit()
+        logger.info(
+            "Refreshed stale cached artifact: sample_run_id=%s output_key=%s source=%s",
+            sample_row["sample_run_id"], output_key, remote_path,
+        )
+        return ResolvedArtifact(refreshed, CACHE_CURRENT)
+
+    if cached_exists:
+        logger.warning(
+            "Serving unverified cached artifact because source is unavailable: sample_run_id=%s output_key=%s source=%s",
+            sample_row["sample_run_id"], output_key, remote_path,
+        )
+        return ResolvedArtifact(cached_path, CACHE_OFFLINE_UNVERIFIED)
+    return None
 
 
 def _safe_name(value: str) -> str:
@@ -97,7 +155,9 @@ def _delete_cache_entry_and_file(config: Config, connection, sample_run_id: str,
 def _copy_with_sha256(source: Path, destination: Path) -> str:
     digest = hashlib.sha256()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = destination.with_name(f".{destination.name}.tmp")
+    descriptor, temp_name = tempfile.mkstemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent)
+    os.close(descriptor)
+    temp_path = Path(temp_name)
     try:
         with source.open("rb") as source_handle, temp_path.open("wb") as destination_handle:
             for chunk in iter(lambda: source_handle.read(1024 * 1024), b""):
@@ -108,6 +168,32 @@ def _copy_with_sha256(source: Path, destination: Path) -> str:
         if temp_path.exists():
             temp_path.unlink()
     return digest.hexdigest()
+
+
+def _cache_output(config, connection, sample_row, output_key, remote_path, relname, remote_stat) -> Path:
+    cached_relpath = _cache_relpath(sample_row["sample_run_id"], output_key, relname)
+    destination = config.cache.outputs_root / cached_relpath
+    digest = _copy_with_sha256(remote_path, destination)
+    previous_entry = get_output_cache_entry(connection, sample_row["sample_run_id"], output_key)
+    upsert_output_cache_entry(
+        connection,
+        {
+            "sample_run_id": sample_row["sample_run_id"],
+            "output_key": output_key,
+            "remote_relpath": relname,
+            "cached_relpath": cached_relpath.as_posix(),
+            "remote_size": remote_stat.st_size,
+            "remote_mtime_ns": remote_stat.st_mtime_ns,
+            "cached_sha256": digest,
+            "cached_at": utc_now(),
+            "verified_at": None,
+        },
+    )
+    if previous_entry is not None and previous_entry["cached_relpath"] != cached_relpath.as_posix():
+        previous_path = cached_file_path(config, previous_entry["cached_relpath"])
+        if previous_path.exists():
+            previous_path.unlink()
+    return destination
 
 
 def cache_sample_outputs(config: Config, connection, sample_row: dict) -> int:
@@ -123,28 +209,7 @@ def cache_sample_outputs(config: Config, connection, sample_row: dict) -> int:
             continue
 
         stat = remote_path.stat()
-        cached_relpath = _cache_relpath(sample_row["sample_run_id"], output_key, relname)
-        destination = config.cache.outputs_root / cached_relpath
-        digest = _copy_with_sha256(remote_path, destination)
-        previous_entry = get_output_cache_entry(connection, sample_row["sample_run_id"], output_key)
-        upsert_output_cache_entry(
-            connection,
-            {
-                "sample_run_id": sample_row["sample_run_id"],
-                "output_key": output_key,
-                "remote_relpath": relname,
-                "cached_relpath": cached_relpath.as_posix(),
-                "remote_size": stat.st_size,
-                "remote_mtime_ns": stat.st_mtime_ns,
-                "cached_sha256": digest,
-                "cached_at": utc_now(),
-                "verified_at": None,
-            },
-        )
-        if previous_entry is not None and previous_entry["cached_relpath"] != cached_relpath.as_posix():
-            previous_path = cached_file_path(config, previous_entry["cached_relpath"])
-            if previous_path.exists():
-                previous_path.unlink()
+        _cache_output(config, connection, sample_row, output_key, remote_path, relname, stat)
         cached += 1
     return cached
 
