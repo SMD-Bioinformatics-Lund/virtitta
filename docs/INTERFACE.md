@@ -2,6 +2,16 @@
 
 This guide describes the browser interface. Available controls depend on authentication and role settings.
 
+## In-App Help
+
+The **Help** link beside **Samples** opens a compact browser manual covering the configured table columns, filters,
+selection and action controls, sample details, and enabled analysis tools. When logged in, the page includes only
+functions available to the current role. Anonymous visitors see basic viewer-level help; deployments with
+authentication disabled show all available functions.
+
+The clustering section explains the MAFFT and IQ-TREE maximum-likelihood workflow. Distance matrices are documented
+separately because they use MAFFT and positional read coverage but do not run IQ-TREE or GrapeTree.
+
 ## Main Table
 
 The main table is the primary review workspace.

@@ -307,6 +307,11 @@ Use `cookie_secure = true` when Virtitta is served over HTTPS. For temporary loc
 Local passwords are stored as salted PBKDF2-HMAC-SHA256 hashes. Active sessions use opaque random tokens stored in
 HttpOnly SameSite cookies. Authenticated POST forms use CSRF tokens.
 
+`/help` is intentionally public. Anonymous visitors see viewer-level documentation without sample data or
+administrative instructions. After login, the same page adds help for controls permitted to the current role. This
+public route does not make the corresponding application actions public; their existing route permissions remain in
+effect.
+
 ## User Management
 
 Create users:

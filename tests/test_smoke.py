@@ -33,7 +33,7 @@ from virtitta.app import (
     table_columns,
 )
 from virtitta.artifact_cache import CACHE_OK, CACHE_STALE, verify_sample_cache
-from virtitta.auth import create_login_session, hash_password
+from virtitta.auth import create_login_session, disabled_auth_user, hash_password
 from virtitta.cli import build_parser
 from virtitta.cluster import ClusterError, cluster_artifacts, prepare_cluster_files, run_cluster_job
 from virtitta.config import load_config
@@ -3190,9 +3190,103 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(delete_response.status_code, 204)
 
     def test_auth_public_path_exemption_includes_cluster_artifacts(self) -> None:
+        self.assertTrue(is_public_request_path("/help"))
         self.assertTrue(is_public_request_path("/clusters/public/public-token/grapetree.json"))
         self.assertTrue(is_public_request_path("/clusters/public/public-token/metadata.txt"))
         self.assertFalse(is_public_request_path("/clusters/job1"))
+
+    def test_public_help_shows_basic_content_without_role_actions(self) -> None:
+        self.enable_auth()
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/help")
+        request = self.make_request(app, path="/help")
+        request.state.current_user = None
+
+        response = route.endpoint(request)
+        rendered = response.body.decode("utf-8")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Showing basic viewer help", rendered)
+        self.assertIn("Main-table headers", rendered)
+        self.assertIn("Percentage identity of the main BLAST typing match", rendered)
+        self.assertIn('href="http://testserver/help">Help</a>', rendered)
+        self.assertNotIn("Functions available to your role", rendered)
+        self.assertNotIn("Edit metadata", rendered)
+        self.assertNotIn("Clustering requires", rendered)
+
+    def test_help_content_follows_authenticated_role_permissions(self) -> None:
+        self.enable_auth()
+        for username, role in (("commenter", "commenter"), ("reviewer", "reviewer"), ("admin", "admin")):
+            self.create_local_user(username, role)
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/help")
+
+        _token, commenter = self.login_local_user("commenter")
+        commenter_rendered = route.endpoint(self.make_user_request(app, commenter, path="/help")).body.decode("utf-8")
+        self.assertIn("Showing functions available to the commenter role", commenter_rendered)
+        self.assertIn("Add/Remove group", commenter_rendered)
+        self.assertIn("You may delete your own comments", commenter_rendered)
+        self.assertNotIn("QC review", commenter_rendered)
+
+        _token, reviewer = self.login_local_user("reviewer")
+        reviewer_rendered = route.endpoint(self.make_user_request(app, reviewer, path="/help")).body.decode("utf-8")
+        self.assertIn("Showing functions available to the reviewer role", reviewer_rendered)
+        self.assertIn("QC review", reviewer_rendered)
+        self.assertIn("Categories", reviewer_rendered)
+        self.assertIn("Export LIMS", reviewer_rendered)
+        self.assertNotIn("Edit metadata", reviewer_rendered)
+        self.assertNotIn("Refresh run", reviewer_rendered)
+        self.assertNotIn("Delete samples", reviewer_rendered)
+
+        _token, admin = self.login_local_user("admin")
+        admin_rendered = route.endpoint(self.make_user_request(app, admin, path="/help")).body.decode("utf-8")
+        self.assertIn("Showing functions available to the admin role", admin_rendered)
+        self.assertIn("Edit metadata", admin_rendered)
+        self.assertIn("Refresh run", admin_rendered)
+        self.assertIn("Delete samples", admin_rendered)
+        self.assertIn("You may delete any comment", admin_rendered)
+
+    def test_help_follows_enabled_analysis_and_viewer_features(self) -> None:
+        self.enable_cluster()
+        self.enable_webigv()
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/help")
+
+        response = route.endpoint(self.make_user_request(app, disabled_auth_user(), path="/help"))
+        rendered = response.body.decode("utf-8")
+
+        self.assertIn("Clustering requires at least three selected samples", rendered)
+        self.assertIn("IQ-TREE then estimates a maximum-likelihood tree", rendered)
+        self.assertIn("Distance analysis requires at least two samples", rendered)
+        self.assertIn("webIGV", rendered)
+
+    def test_help_uses_configured_columns_labels_and_root_path(self) -> None:
+        write_test_config(
+            self.config_path,
+            root=self.tmp_path,
+            db_path=self.db_path,
+            root_path="/virtitta",
+        )
+        with self.config_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                "\n"
+                "[ui]\n"
+                'table_columns = ["lid", "typing_main_blast_identity"]\n'
+                'visible_columns = ["lid", "typing_main_blast_identity"]\n'
+                "\n"
+                "[ui.column_labels]\n"
+                'lid = "Laboratory ID"\n'
+            )
+        app = create_app(self.config_path)
+        route = next(route for route in app.router.routes if getattr(route, "path", None) == "/help")
+        request = self.make_request(app, path="/help", root_path="/virtitta")
+        request.state.current_user = disabled_auth_user()
+
+        rendered = route.endpoint(request).body.decode("utf-8")
+
+        self.assertLess(rendered.index(">Laboratory ID</th>"), rendered.index(">BLAST %</th>"))
+        self.assertIn('href="http://testserver/virtitta/help">Help</a>', rendered)
+        self.assertNotIn("Mean read depth across the consensus sequence", rendered)
 
     def test_viewer_login_can_view_but_not_see_mutating_controls(self) -> None:
         self.enable_auth()

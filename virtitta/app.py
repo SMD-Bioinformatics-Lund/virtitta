@@ -27,8 +27,10 @@ from virtitta.auth import (
     PERMISSION_RUN_REFRESH,
     PERMISSION_SAMPLE_DELETE,
     PERMISSION_VIEW,
+    ROLE_ADMIN,
     ROLE_COMMENTER,
     ROLE_REVIEWER,
+    ROLE_VIEWER,
     authenticate_local_user,
     create_login_session,
     disabled_auth_user,
@@ -198,6 +200,43 @@ SAMPLE_OVERRIDE_LABELS = {
     "typing_report_subtype": "Subtype",
 }
 
+HELP_COLUMN_DESCRIPTIONS = {
+    "lid": "Primary laboratory identifier shown for the sample when available.",
+    "sample_id": "Technical sample identifier used by VirPipa and in result filenames.",
+    "sequencing_date": "Sequencing date derived from the run name, with the imported date as fallback.",
+    "generated_date": "Date recorded when the VirPipa QC summary was generated.",
+    "sample_category": "Review category assigned in Virtitta, such as production or test.",
+    "sample_metadata_classification": "Classification imported from the sample metadata source.",
+    "qc_status": "Virtitta review decision: unreviewed, pass, or fail.",
+    "manual_groups": "User-defined groups containing the sample.",
+    "typing_report_subtype": "HCV subtype reported from the main VirPipa BLAST result.",
+    "typing_main_blast_identity": "Percentage identity of the main BLAST typing match.",
+    "resistance_summary": "Compact geno2pheno HCV drug-resistance calls; hover for detected mutations.",
+    "host_filter_reads_in": "Number of reads entering host/human read filtering.",
+    "host_filter_reads_removed_proportion": "Percentage of input reads removed by host/human filtering.",
+    "qc_coverage_pct": "Overall consensus coverage percentage reported by VirPipa.",
+    "qc_mean_depth": "Mean read depth across the consensus sequence.",
+    "qc_coverage_1x_pct": "Percentage of consensus positions covered by at least 1 read.",
+    "qc_coverage_10x_pct": "Percentage of consensus positions covered by at least 10 reads.",
+    "qc_coverage_100x_pct": "Percentage of consensus positions covered by at least 100 reads.",
+    "qc_coverage_1000x_pct": "Percentage of consensus positions covered by at least 1,000 reads.",
+    "variant_af_count_005": "Number of variant calls at the 0.05 allele-frequency threshold.",
+    "variant_af_count_01": "Number of variant calls at the 0.1 allele-frequency threshold.",
+    "variant_af_count_015": "Number of variant calls at the 0.15 allele-frequency threshold.",
+    "variant_af_count_02": "Number of variant calls at the 0.2 allele-frequency threshold.",
+    "variant_af_count_03": "Number of variant calls at the 0.3 allele-frequency threshold.",
+    "variant_af_count_04": "Number of variant calls at the 0.4 allele-frequency threshold.",
+    "sample_metadata_ct": "Diagnostic cycle-threshold value imported from sample metadata.",
+    "sample_metadata_library_concentration_ng_ul": "Library concentration in ng/µl from sample metadata.",
+    "sample_metadata_library_fragment_length_bp": "Library fragment length in base pairs from sample metadata.",
+    "sample_metadata_department": "Submitting department imported from sample metadata.",
+    "sample_metadata_sequencing_runs": "Sequencing-run information imported from sample metadata.",
+    "sample_metadata_sample_submission_signing": "Sample-submission signing information imported from metadata.",
+    "run_name": "VirPipa run from which the sample was imported.",
+    "comment_count": "Number of comments; hover for a preview or open the sample to read them.",
+    "actions": "Available shortcuts for opening the sample, IGV, webIGV, or LIMS export.",
+}
+
 
 def format_value(value: object, column: str | None = None) -> str:
     if value is None:
@@ -274,7 +313,7 @@ def table_columns(config: Config) -> list[str]:
 
 
 def is_public_request_path(path: str) -> bool:
-    return path == "/login" or path.startswith("/static/") or path.startswith("/clusters/public/")
+    return path in {"/help", "/login"} or path.startswith("/static/") or path.startswith("/clusters/public/")
 
 
 def request_path_without_root_path(path: str, root_path: str) -> str:
@@ -1172,6 +1211,59 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         response = RedirectResponse("/login", status_code=303)
         response.delete_cookie(config.auth.cookie_name, path=config.app.root_path or "/")
         return response
+
+    @app.get("/help", response_class=HTMLResponse)
+    def help_page(request: Request):
+        current_user = getattr(request.state, "current_user", None)
+        if current_user is not None:
+            help_role = current_user.role
+        elif config.auth.enabled:
+            help_role = ROLE_VIEWER
+        else:
+            help_role = ROLE_ADMIN
+
+        column_labels = {**DEFAULT_COLUMN_LABELS, **config.ui.column_labels}
+        help_columns = [
+            {
+                "key": column,
+                "label": column_labels.get(column, column),
+                "description": HELP_COLUMN_DESCRIPTIONS.get(column, "Configured sample field."),
+            }
+            for column in [*table_columns(config), "comment_count", "actions"]
+        ]
+
+        return templates.TemplateResponse(
+            request,
+            "help.html",
+            {
+                "request": request,
+                "config": config,
+                "help_role": help_role,
+                "help_columns": help_columns,
+                "highlighted_columns": [
+                    column_labels.get(column, column)
+                    for column in table_columns(config)
+                    if column in config.ui.highlight_rules
+                ],
+                "permissions": {
+                    "category_update": permission_allowed(request, PERMISSION_CATEGORY_UPDATE),
+                    "comment_add": permission_allowed(request, PERMISSION_COMMENT_ADD),
+                    "comment_delete_any": permission_allowed(request, PERMISSION_COMMENT_DELETE),
+                    "comment_delete_own": help_role in {ROLE_COMMENTER, ROLE_REVIEWER},
+                    "export_lims": permission_allowed(request, PERMISSION_EXPORT_LIMS),
+                    "group_update": permission_allowed(request, PERMISSION_GROUP_UPDATE),
+                    "metadata_override": permission_allowed(request, PERMISSION_METADATA_OVERRIDE),
+                    "qc_update": permission_allowed(request, PERMISSION_QC_UPDATE),
+                    "run_refresh": permission_allowed(request, PERMISSION_RUN_REFRESH),
+                    "sample_delete": permission_allowed(request, PERMISSION_SAMPLE_DELETE),
+                },
+                "cluster_enabled": config.cluster.enabled,
+                "igv_enabled": config.features.igv and config.igv.enabled,
+                "webigv_enabled": webigv_enabled(config),
+                "warning_message": "",
+                "notice_message": "",
+            },
+        )
 
     @app.get("/", response_class=HTMLResponse)
     def index(
