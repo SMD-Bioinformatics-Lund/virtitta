@@ -1,5 +1,8 @@
 FROM mambaorg/micromamba:2.8.1
 
+ARG VIRTITTA_VERSION=0.1.0
+ENV VIRTITTA_VERSION=$VIRTITTA_VERSION
+
 # Build this image on a modern Docker host, then transfer it to Lennart with
 # docker save/load. Numeric ownership keeps the image compatible with legacy
 # image metadata; the base image's mambauser account is UID/GID 57439.

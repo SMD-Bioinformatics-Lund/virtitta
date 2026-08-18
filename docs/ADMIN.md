@@ -137,6 +137,7 @@ poly_t_seed_length = 12
 poly_t_seed_min_t = 10
 poly_t_max_trailing_bases = 100
 mafft_command = "mafft"
+samtools_command = "samtools"
 iqtree_command = "iqtree3"
 mafft_args = ["--auto"]
 iqtree_threads = 4
@@ -150,7 +151,7 @@ the service account cannot otherwise resolve the tools.
 For the local conda workflow, install the command-line tools into the same environment that runs Virtitta:
 
 ```bash
-micromamba install -c conda-forge -c bioconda mafft iqtree
+micromamba install -c conda-forge -c bioconda mafft iqtree samtools
 ```
 
 V1 requires at least three selected samples, uses the imported `iupac_fasta` output for each selected sample, derives
@@ -278,6 +279,13 @@ Refresh/rebuild cache entries before verification:
 python -m virtitta.cli verify-cache --config virtitta.toml --all-runs --refresh
 ```
 
+Interactive artifact reads compare the current result-root path, size, and nanosecond mtime with the cache record. A
+changed source is copied into place atomically before it is served. If the result root is unavailable, an existing
+cached copy remains available but responses identify it as `cache-offline-unverified` and include an HTTP warning.
+`verify-cache` additionally hashes both files and remains useful as an explicit integrity audit; it is not required as
+a scheduled freshness mechanism. Clustering and distance jobs always use live result-root inputs rather than this
+general UI/export cache.
+
 ## Authentication
 
 Authentication is optional and disabled by default.
@@ -298,6 +306,11 @@ Use `cookie_secure = true` when Virtitta is served over HTTPS. For temporary loc
 
 Local passwords are stored as salted PBKDF2-HMAC-SHA256 hashes. Active sessions use opaque random tokens stored in
 HttpOnly SameSite cookies. Authenticated POST forms use CSRF tokens.
+
+`/help` is intentionally public. Anonymous visitors see viewer-level documentation without sample data or
+administrative instructions. After login, the same page adds help for controls permitted to the current role. This
+public route does not make the corresponding application actions public; their existing route permissions remain in
+effect.
 
 ## User Management
 
@@ -518,3 +531,8 @@ profile returns `EPERM` for syscalls unknown to Docker 18.09, preventing Microma
 service remains non-root, publishes only on host loopback, mounts configuration/results/metadata read-only, and
 receives write access only to the configured Virtitta data directory. Remove this exception when the server is
 replaced.
+## Distance-matrix jobs
+
+Pairwise distance matrices use the existing `[cluster]` settings, output root, background executor, trimming configuration, and MAFFT command. They are available when `cluster.enabled = true`; no separate CLI or database migration is required. Coverage is positional and requires ≥1× read depth in both samples. To avoid mixing coordinate systems from different refresh times, distance jobs resolve all FASTA, CRAM, index, and supplied BED inputs directly from the imported result-root paths rather than the general output cache. Virtitta prefers `outputs.coverage_1x_bed` from imported QC JSON. For historical runs it executes `cluster.samtools_command` (default `samtools`) against the main CRAM and FASTA, then atomically caches the derived BED and a FASTA/FAI/CRAM/CRAI stat manifest under `cache.outputs_root/coverage-1x`. Invalid supplied masks and failed derivations fail the job; FASTA letter case is not used as coverage evidence.
+
+Each job stores canonical JSON, an authenticated `coverage-masks.bed` containing the trimmed masks actually used, and compact and detailed TSV matrices for both 15% IUPAC and majority consensus. Canonical JSON also records a deterministic, mode-specific UPGMA display order based on total event counts. Off-diagonal pairs with no bases compared remain zero-valued internally, use a documented maximum-plus-one penalty only for UPGMA ordering, and export as `-1` or “No bases compared” in the TSV matrices. Distance artifacts require normal Virtitta authentication and are never served by the public GrapeTree artifact route.

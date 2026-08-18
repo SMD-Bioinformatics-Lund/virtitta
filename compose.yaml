@@ -25,4 +25,8 @@ services:
         source: ${VIRTITTA_CLARITY_ROOT:-./data}
         target: ${VIRTITTA_CLARITY_CONTAINER_ROOT:-/clarity}
         read_only: true
+      - type: bind
+        source: /mnt/isilon/backup_hopper/results/virpipa
+        target: /media/isilon/backup_hopper/results/virpipa
+        read_only: true
     command: ["serve", "--config", "/config/virtitta.toml", "--host", "0.0.0.0", "--port", "8000"]

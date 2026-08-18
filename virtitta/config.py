@@ -139,6 +139,7 @@ class ClusterSettings:
     poly_t_seed_min_t: int = 10
     poly_t_max_trailing_bases: int = 100
     mafft_command: str = "mafft"
+    samtools_command: str = "samtools"
     iqtree_command: str = "iqtree3"
     mafft_args: list[str] = field(default_factory=lambda: ["--auto"])
     iqtree_threads: int = 4
@@ -372,6 +373,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
             poly_t_seed_min_t=max(1, int(cluster_raw.get("poly_t_seed_min_t", 10))),
             poly_t_max_trailing_bases=max(0, int(cluster_raw.get("poly_t_max_trailing_bases", 100))),
             mafft_command=str(cluster_raw.get("mafft_command", "mafft")),
+            samtools_command=str(cluster_raw.get("samtools_command", "samtools")),
             iqtree_command=str(cluster_raw.get("iqtree_command", "iqtree3")),
             mafft_args=cluster_mafft_args,
             iqtree_threads=max(1, int(cluster_raw.get("iqtree_threads", 4))),

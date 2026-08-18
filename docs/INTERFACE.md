@@ -1,6 +1,17 @@
 # Virtitta Interface Guide
 
 This guide describes the browser interface. Available controls depend on authentication and role settings.
+The upper-left subtitle includes the running Virtitta image version, for example `v0.9.0-1-gccd14b3`.
+
+## In-App Help
+
+The **Help** link beside **Samples** opens a compact browser manual covering the configured table columns, filters,
+selection and action controls, sample details, and enabled analysis tools. When logged in, the page includes only
+functions available to the current role. Anonymous visitors see basic viewer-level help; deployments with
+authentication disabled show all available functions.
+
+The clustering section explains the MAFFT and IQ-TREE maximum-likelihood workflow. Distance matrices are documented
+separately because they use MAFFT and positional read coverage but do not run IQ-TREE or GrapeTree.
 
 ## Main Table
 
@@ -94,7 +105,9 @@ Repeated exports create unique filenames instead of overwriting existing files.
 
 The FASTA clipboard exports use canonical `main_fasta` and `iupac_fasta` outputs, falling back to legacy `export_*`
 outputs for older imports. The export menu lets the operator choose LID or sample ID headers; LID is the default.
-When configured and populated, Virtitta serves these from the local output cache.
+When configured and populated, Virtitta serves these from the local output cache after a cheap source freshness check.
+Changed sources refresh the cache automatically. If result storage is temporarily unavailable, existing cached copies
+remain downloadable; clipboard exports show a warning that the content is an unverified cached snapshot.
 
 ## Notifications
 
@@ -172,3 +185,16 @@ Roles:
 - `viewer`: view and read exports only
 
 Routes are still protected server-side even when controls are hidden.
+## Pairwise distance matrices
+
+When clustering is enabled, select at least two samples and use **Distance...** to create pairwise matrices. This is separate from clustering: it runs MAFFT once to establish a shared gap pattern and does not run IQ-TREE or GrapeTree. Both the 15% IUPAC and majority-consensus FASTAs are required.
+
+The result page starts with the **15% IUPAC** matrix. Switch between that and **Majority consensus**, and between compact event counts and detailed cells showing substitutions, indel events, and the pair-specific number of compared bases. "Bases compared" is the pair-specific intersection of positions with read coverage ≥1× and valid IUPAC bases in both samples. Internal indel blocks are counted only when the opposite bases and both flanks are coverage-supported and valid; terminal gaps are ignored. Both matrices share one heatmap scale; zero and diagonal cells remain neutral. These values are coverage-supported event-like minimum difference counts, not phylogenetic or transmission distances.
+
+The **Order** control keeps the selected/main-table order by default or groups each FASTA mode independently with
+UPGMA average linkage over total event counts. This ordering is only a visual evaluation aid, not a phylogenetic
+analysis. Pairs with no bases compared are shown as `-1` on grey cells and as “No bases compared” in detailed mode;
+UPGMA gives those pairs a temporary penalty one above the largest available event count so missing evidence does not
+look like identity.
+
+FASTA case is ignored and unknown bases are excluded from comparisons. Overlapping IUPAC alleles match, internal same-direction gap blocks count as one indel event when coverage and flank requirements are met, and terminal gaps are ignored. Duplicate visible identifiers are blocked unless the explicit allow-duplicates action is used, which adds run-name suffixes.

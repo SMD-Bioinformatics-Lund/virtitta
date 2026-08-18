@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel stack">
+  <div class="split-header">
+    <div>
+      <h2>Help</h2>
+      {% if config.auth.enabled and request.state.current_user %}
+      <div class="meta-line">Showing functions available to the {{ help_role }} role.</div>
+      {% elif config.auth.enabled %}
+      <div class="meta-line">Showing basic viewer help. Sign in to see help for additional functions available to your account.</div>
+      {% else %}
+      <div class="meta-line">Authentication is disabled, so all available functions are included.</div>
+      {% endif %}
+    </div>
+    <a class="button-link secondary" href="{{ request.url_for('index') }}">Samples</a>
+  </div>
+  <nav class="help-nav" aria-label="Help sections">
+    <a href="#getting-started">Getting started</a>
+    <a href="#table">Table headers</a>
+    <a href="#filters">Filters</a>
+    <a href="#actions">Selection and actions</a>
+    <a href="#sample-detail">Sample detail</a>
+    {% if cluster_enabled %}<a href="#clustering">Clustering</a><a href="#distances">Distance matrices</a>{% endif %}
+  </nav>
+</section>
+
+<section class="grid two-col">
+  <div class="panel stack" id="getting-started">
+    <h3>Getting started</h3>
+    <ol class="help-list">
+      <li>Use the filters to narrow the sample table.</li>
+      <li>Open a sample to review its QC values, resistance results, comments, and result files.</li>
+      {% if permissions.qc_update %}<li>Set the QC result to pass or fail. A comment is required when failing a sample.</li>{% endif %}
+      <li>Select samples in the table when an action should apply to several samples.</li>
+    </ol>
+    <p class="help-note">LID is the preferred visible identifier. Sample ID is the technical identity used by VirPipa and in filenames.</p>
+  </div>
+
+  <div class="panel stack">
+    <h3>Colors and warnings</h3>
+    <p>Green and red QC cells show the review decision. Yellow and red metric highlights mark configured warning and danger thresholds; they help direct attention but do not automatically decide QC.</p>
+    {% if highlighted_columns %}
+    <p class="meta-line">Metrics currently configured for threshold highlighting: {{ highlighted_columns|join(', ') }}.</p>
+    {% endif %}
+    <p>The resistance strip uses its own legend for detected, probable, possible, clear, and missing results. Hover over the strip or open the sample for details.</p>
+  </div>
+</section>
+
+<section class="panel stack" id="table">
+  <h3>Main-table headers</h3>
+  <p class="help-note">Click a header to sort by that column. The arrow shows the current sort direction. The table shows the columns configured for this Virtitta deployment.</p>
+  <div class="table-wrap">
+    <table class="detail-table help-table">
+      <thead><tr><th>Header</th><th>Meaning</th></tr></thead>
+      <tbody>
+        {% for column in help_columns %}
+        <tr><th>{{ column.label }}</th><td>{{ column.description }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="grid two-col">
+  <div class="panel stack" id="filters">
+    <h3>Filter row</h3>
+    <dl class="help-definitions">
+      <dt>Search sample, LID, run</dt><dd>Filters the rows already loaded in the browser as you type.</dd>
+      <dt>Run, subtype, and QC</dt><dd>Reload the table with matching samples when changed.</dd>
+      <dt>Categories and groups</dt><dd>Allow one or several values. Restricted categories are only available to permitted roles.</dd>
+      <dt>Min cov %, depth, and BLAST %</dt><dd>Keep samples at or above the entered minimum.</dd>
+      <dt>Max CT</dt><dd>Keep samples at or below the entered CT value.</dd>
+      <dt>Sort and descending</dt><dd>Choose the initial table order, then select Apply.</dd>
+      <dt>Reset</dt><dd>Removes filters and clears the saved selection.</dd>
+    </dl>
+  </div>
+
+  <div class="panel stack" id="actions">
+    <h3>Selection and action bar</h3>
+    <dl class="help-definitions">
+      <dt>Select all</dt><dd>Selects every currently visible row. The checkbox in the table header does the same.</dd>
+      <dt>Clear</dt><dd>Clears the complete selection, including samples retained from another filtered view.</dd>
+      <dt>Selected only</dt><dd>Temporarily hides rows that are not selected.</dd>
+      <dt>Columns</dt><dd>Shows or hides table columns. Your last column combination is stored in this browser.</dd>
+      {% if config.auth.enabled and request.state.current_user %}<dt>Column presets</dt><dd>Save named column combinations to your account and apply them from the selector.</dd>{% endif %}
+      <dt>Export...</dt><dd>Copies the visible table or selected consensus FASTAs, or downloads a LIMS-format text file in the browser.</dd>
+      {% if permissions.export_lims %}<dt>Export LIMS</dt><dd>Writes the selected LIMS results to the configured server-side export directory.</dd>{% endif %}
+      {% if permissions.qc_update or permissions.category_update or permissions.sample_delete %}<dt>Manage...</dt><dd>Contains the permitted QC, category, and deletion actions described below.</dd>{% endif %}
+      {% if permissions.group_update %}<dt>Add/Remove group</dt><dd>Adds the selected samples to a named manual group or removes them from it.</dd>{% endif %}
+      {% if cluster_enabled %}<dt>Cluster... / Distance...</dt><dd>Starts the analyses described later on this page for the selected samples.</dd>{% endif %}
+    </dl>
+    <p class="help-note">Selections remain while filters change, making it possible to collect samples from several views. Clear, Reset, or a manual page reload removes the saved selection.</p>
+  </div>
+</section>
+
+{% if permissions.qc_update or permissions.category_update or permissions.comment_add or permissions.run_refresh or permissions.metadata_override or permissions.sample_delete %}
+<section class="panel stack">
+  <h3>Functions available to your role</h3>
+  <div class="help-card-grid">
+    {% if permissions.qc_update %}<div><strong>QC review</strong><p>Mark selected samples pass, fail, or unreviewed. Failing requires a comment; an optional comment can accompany other QC changes.</p></div>{% endif %}
+    {% if permissions.category_update %}<div><strong>Categories</strong><p>Assign or clear the configured sample categories. Category changes are separate from QC state.</p></div>{% endif %}
+    {% if permissions.comment_add %}<div><strong>Comments</strong><p>Add comments on the sample detail page.{% if permissions.comment_delete_any %} You may delete any comment.{% elif permissions.comment_delete_own %} You may delete your own comments.{% endif %}</p></div>{% endif %}
+    {% if permissions.run_refresh %}<div><strong>Refresh run</strong><p>Re-imports metadata for the selected run while preserving Virtitta-owned review state.</p></div>{% endif %}
+    {% if permissions.metadata_override %}<div><strong>Edit metadata</strong><p>Overrides selected display fields without replacing the imported values. Changes create traceability comments.</p></div>{% endif %}
+    {% if permissions.sample_delete %}<div><strong>Delete samples</strong><p>Removes records from the Virtitta database. It does not delete VirPipa result files on disk.</p></div>{% endif %}
+  </div>
+</section>
+{% endif %}
+
+<section class="panel stack" id="sample-detail">
+  <h3>Sample detail</h3>
+  <p>Open a sample by selecting its LID or the Open action. The detail page brings together the review state, imported summary, comments, coverage rug plot, resistance calls, result files, IGV track files, and the original imported QC JSON.</p>
+  <ul class="help-list">
+    {% if igv_enabled %}<li><strong>IGV</strong> asks a locally running desktop IGV to load the configured files and requires the appropriate drive mappings.</li>{% endif %}
+    {% if webigv_enabled %}<li><strong>webIGV</strong> opens the same type of evidence in the browser and is useful when desktop drive mappings are unavailable.</li>{% endif %}
+    <li><strong>View</strong> opens supported text files in the browser; <strong>Download</strong> saves the file using normal browser behavior.</li>
+    <li>Italic metadata values are Virtitta overrides. Hover over them to see the imported value.</li>
+  </ul>
+</section>
+
+{% if cluster_enabled %}
+<section class="grid two-col">
+  <div class="panel stack" id="clustering">
+    <h3>Clustering</h3>
+    <p>Clustering requires at least three selected samples. Virtitta collects each sample's 15% IUPAC consensus FASTA and prepares the sequences using the configured 5′ and trailing poly-T trimming.</p>
+    <p>MAFFT aligns the prepared sequences. IQ-TREE then estimates a maximum-likelihood tree from that alignment. This is a phylogenetic analysis; interpretation still depends on sequence quality, sampling, and appropriate epidemiological context.</p>
+    <p>The result page reports job progress and provides the input, prepared FASTA, alignment, Newick tree, metadata, command settings, and log. When configured, <strong>Open GrapeTree</strong> sends the tree and metadata to GrapeTree for visualization.</p>
+    <p class="help-note">Duplicate FASTA identifiers stop the normal action. The explicit “allow duplicates” action makes duplicated identifiers unique by adding their run names.</p>
+  </div>
+
+  <div class="panel stack" id="distances">
+    <h3>Distance matrices</h3>
+    <p>Distance analysis requires at least two samples and both the 15% IUPAC and majority consensus FASTAs. Virtitta applies identical trimming and uses one MAFFT alignment to establish the shared gap pattern. It does not run IQ-TREE or GrapeTree.</p>
+    <p>For each pair, a position is compared only when both samples have at least 1× read coverage and valid IUPAC bases. Compatible IUPAC bases match. Substitutions count individually, while a supported internal gap block counts as one indel event; terminal and unsupported gaps are ignored.</p>
+    <ul class="help-list">
+      <li><strong>Counts</strong> shows substitutions plus indel events. <strong>Details</strong> separates them and shows the pair-specific bases compared.</li>
+      <li><strong>15% IUPAC</strong> and <strong>Majority consensus</strong> select the consensus representation.</li>
+      <li><strong>UPGMA</strong> reorders rows and columns to pull similar samples together for visual review. It does not change the values and is not a phylogenetic result.</li>
+      <li>A grey <strong>-1</strong> means the pair had no eligible bases to compare.</li>
+    </ul>
+    <p class="help-note">These are coverage-supported, event-like minimum differences—not transmission distances or phylogenetic branch lengths.</p>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

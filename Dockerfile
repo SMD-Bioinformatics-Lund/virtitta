@@ -1,5 +1,8 @@
 FROM mambaorg/micromamba:2.8.1
 
+ARG VIRTITTA_VERSION=0.1.0
+ENV VIRTITTA_VERSION=$VIRTITTA_VERSION
+
 COPY --chown=$MAMBA_USER:$MAMBA_USER environment.container.yml /tmp/environment.yml
 RUN micromamba install --yes --name base --file /tmp/environment.yml \
     && micromamba clean --all --yes

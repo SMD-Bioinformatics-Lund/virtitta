@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="split-header">
+    <div>
+      <h2>Distance matrices {{ job.id }}</h2>
+      <div class="meta-line"><span data-distance-status>{{ job.status }}</span> · {{ job.selected_count }} samples{% if job.started_at %} · started {{ job.started_at }}{% endif %}{% if job.completed_at %} · completed {{ job.completed_at }}{% endif %}</div>
+    </div>
+    <a class="button-link secondary" href="{{ request.url_for('index') }}">Samples</a>
+  </div>
+  <p class="meta-line">Coverage-supported event-like differences using positions covered at ≥1× in both samples; not phylogenetic or transmission distances.</p>
+  {% if job.warning_text %}<p class="warning-inline">{{ job.warning_text }}</p>{% endif %}
+  {% if job.error_text %}<p class="warning-inline">{{ job.error_text }}</p>{% endif %}
+</section>
+
+{% if result %}
+<section class="panel stack">
+  <div class="button-row" role="group" aria-label="Matrix controls">
+    <label>FASTA mode <select data-matrix-mode><option value="iupac">15% IUPAC</option><option value="majority">Majority consensus</option></select></label>
+    <label>Display <select data-matrix-display><option value="counts">Counts</option><option value="details">Details</option></select></label>
+    <label>Order <select data-matrix-order><option value="selected">Selected samples</option><option value="upgma">UPGMA</option></select></label>
+  </div>
+  {% for mode in ['iupac', 'majority'] %}
+  <div class="distance-matrix-wrap" data-distance-matrix="{{ mode }}"{% if mode != 'iupac' %} hidden{% endif %}>
+    <table class="distance-matrix">
+      <thead><tr><th>ID</th>{% for identifier in result[mode].identifiers %}<th data-matrix-identifier="{{ identifier }}">{{ identifier }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for identifier in result[mode].identifiers %}{% set row_index = loop.index0 %}
+        <tr data-matrix-identifier="{{ identifier }}"><th>{{ identifier }}</th>
+        {% for cell in result[mode].cells[row_index] %}{% set diagonal = loop.index0 == row_index %}{% set unavailable = not diagonal and cell.compared_bases == 0 %}
+          <td class="{% if unavailable %}distance-unavailable{% elif diagonal or cell.total_events == 0 %}distance-neutral{% endif %}" data-matrix-identifier="{{ result[mode].identifiers[loop.index0] }}" data-total="{{ -1 if unavailable else cell.total_events }}"{% if not unavailable %} style="--distance-intensity: {{ cell.total_events / result.max_total_events if result.max_total_events else 0 }}"{% endif %}>
+            <span data-counts>{{ -1 if unavailable else cell.total_events }}</span>
+            <span data-details hidden>{% if unavailable %}No bases compared{% else %}{{ cell.total_events }} events ({{ cell.substitutions }} substitutions + {{ cell.indel_events }} indel); {{ '{:,}'.format(cell.compared_bases) }} bases compared{% endif %}</span>
+          </td>
+        {% endfor %}</tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="grid two-col">
+  <div class="panel stack"><h3>Artifacts</h3><div class="link-grid">{% for key, relpath in artifacts.items() %}<a class="file-link" href="{{ request.url_for('distance_artifact', job_id=job.id, artifact_key=key) }}"><span class="file-name">{{ key }}</span><span class="meta-line">{{ relpath }}</span></a>{% endfor %}</div></div>
+  <div class="panel stack"><h3>Samples</h3><div class="table-wrap"><table class="detail-table"><thead><tr><th>ID</th><th>Sample</th></tr></thead><tbody>{% for sample in samples %}<tr><td>{{ sample.tree_id }}</td><td><a href="{{ request.url_for('sample_detail', sample_run_id=sample.sample_run_id) }}">{{ sample.display_identifier }}</a></td></tr>{% endfor %}</tbody></table></div></div>
+</section>
+
+{% if job.status in ['queued', 'running'] %}<script>
+const statusLabel = document.querySelector('[data-distance-status]'); const statusUrl = {{ status_url|tojson }};
+async function refreshDistanceStatus() { const response = await fetch(statusUrl, {headers: {'Accept': 'application/json'}}); if (!response.ok) return; const value = await response.json(); statusLabel.textContent = value.status; if (value.status === 'completed' || value.status === 'failed') window.location.reload(); else window.setTimeout(refreshDistanceStatus, 3000); }
+window.setTimeout(refreshDistanceStatus, 3000);
+</script>{% endif %}
+{% if result %}<script>
+const modeSelect = document.querySelector('[data-matrix-mode]'); const displaySelect = document.querySelector('[data-matrix-display]'); const orderSelect = document.querySelector('[data-matrix-order]');
+const matrixOrders = {
+  iupac: {{ result.iupac.ordering.identifiers|tojson }},
+  majority: {{ result.majority.ordering.identifiers|tojson }}
+};
+function applyMatrixOrder() {
+  for (const matrix of document.querySelectorAll('[data-distance-matrix]')) {
+    const table = matrix.querySelector('table');
+    const header = table.tHead.rows[0];
+    const identifiers = orderSelect.value === 'upgma' ? matrixOrders[matrix.dataset.distanceMatrix] : resultSelectedOrders[matrix.dataset.distanceMatrix];
+    const headerCells = new Map(Array.from(header.querySelectorAll('[data-matrix-identifier]')).map(cell => [cell.dataset.matrixIdentifier, cell]));
+    for (const identifier of identifiers) header.appendChild(headerCells.get(identifier));
+    const rows = new Map(Array.from(table.tBodies[0].rows).map(row => [row.dataset.matrixIdentifier, row]));
+    for (const identifier of identifiers) {
+      const row = rows.get(identifier);
+      const cells = new Map(Array.from(row.querySelectorAll('td[data-matrix-identifier]')).map(cell => [cell.dataset.matrixIdentifier, cell]));
+      for (const columnIdentifier of identifiers) row.appendChild(cells.get(columnIdentifier));
+      table.tBodies[0].appendChild(row);
+    }
+  }
+}
+const resultSelectedOrders = {
+  iupac: {{ result.iupac.identifiers|tojson }},
+  majority: {{ result.majority.identifiers|tojson }}
+};
+modeSelect.addEventListener('change', () => { for (const matrix of document.querySelectorAll('[data-distance-matrix]')) matrix.hidden = matrix.dataset.distanceMatrix !== modeSelect.value; });
+displaySelect.addEventListener('change', () => { for (const item of document.querySelectorAll('[data-counts]')) item.hidden = displaySelect.value !== 'counts'; for (const item of document.querySelectorAll('[data-details]')) item.hidden = displaySelect.value !== 'details'; });
+orderSelect.addEventListener('change', applyMatrixOrder);
+</script>{% endif %}
+{% endblock %}

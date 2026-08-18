@@ -178,6 +178,13 @@
           <button type="submit" name="allow_duplicate_ids" value="true" formaction="{{ request.url_for('create_cluster') }}" formmethod="post" class="secondary">Cluster selected (allow duplicates)</button>
         </div>
       </details>
+      <details class="action-menu">
+        <summary>Distance...</summary>
+        <div class="action-menu-list">
+          <button type="submit" formaction="{{ request.url_for('create_distance_matrices') }}" formmethod="post" class="secondary">Distance matrices</button>
+          <button type="submit" name="allow_duplicate_ids" value="true" formaction="{{ request.url_for('create_distance_matrices') }}" formmethod="post" class="secondary">Distance matrices (allow duplicates)</button>
+        </div>
+      </details>
       {% endif %}
       <details class="action-menu">
         <summary>Export...</summary>
@@ -763,8 +770,14 @@ async function fetchClipboardExport(url, title) {
     throw new Error(message || `Clipboard export failed (${response.status})`);
   }
   const text = await response.text();
+  const artifactSource = response.headers.get('X-Virtitta-Artifact-Source') || '';
+  if (artifactSource.includes('cache-offline-unverified')) {
+    showClientNotice('Result storage is unavailable; the export used an unverified cached copy.', true);
+  }
   if (await copyTextToClipboard(text)) {
-    showClientNotice('Copied export content to clipboard.');
+    if (!artifactSource.includes('cache-offline-unverified')) {
+      showClientNotice('Copied export content to clipboard.');
+    }
     return;
   }
   showClipboardModal(text, title);
