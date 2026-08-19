@@ -376,6 +376,7 @@ const columnPresetDelete = document.getElementById('column-preset-delete');
 const selectionStorageKey = 'virtitta.selectedSampleIds.v1';
 const csrfToken = {% if config.auth.enabled %}{{ request.state.current_user.csrf_token|tojson }}{% else %}''{% endif %};
 let suppressSelectionSave = false;
+let selectionAnchor = null;
 
 function showClientNotice(message, isError = false) {
   window.showAppToast(message, isError);
@@ -407,6 +408,25 @@ function visibleSampleCheckboxes() {
 
 function sampleCheckboxes() {
   return Array.from(document.querySelectorAll('input[type="checkbox"][name="sample_run_id"]'));
+}
+
+function resetSelectionAnchor() {
+  selectionAnchor = null;
+}
+
+function extendVisibleSelection(target) {
+  target.checked = true;
+  const checkboxes = visibleSampleCheckboxes();
+  const anchorIndex = checkboxes.indexOf(selectionAnchor);
+  const targetIndex = checkboxes.indexOf(target);
+  if (anchorIndex < 0 || targetIndex < 0) {
+    return;
+  }
+  const start = Math.min(anchorIndex, targetIndex);
+  const end = Math.max(anchorIndex, targetIndex);
+  for (const box of checkboxes.slice(start, end + 1)) {
+    box.checked = true;
+  }
 }
 
 function readSavedSelection() {
@@ -549,6 +569,7 @@ function syncSelectVisibleCheckbox() {
 }
 
 function setVisibleSampleSelection(checked) {
+  resetSelectionAnchor();
   for (const box of visibleSampleCheckboxes()) {
     box.checked = checked;
   }
@@ -557,6 +578,7 @@ function setVisibleSampleSelection(checked) {
 }
 
 function clearAllSampleSelection() {
+  resetSelectionAnchor();
   for (const box of sampleCheckboxes()) {
     box.checked = false;
   }
@@ -820,14 +842,20 @@ function tableTextFromVisibleColumns() {
 restoreSavedSelection();
 
 if (tableSearchInput) {
-  tableSearchInput.addEventListener('input', applyTableViewFilter);
+  tableSearchInput.addEventListener('input', () => {
+    resetSelectionAnchor();
+    applyTableViewFilter();
+  });
 } else {
   updateSampleCount();
 }
 applyTableViewFilter();
 
 if (selectedOnlyToggle) {
-  selectedOnlyToggle.addEventListener('change', applyTableViewFilter);
+  selectedOnlyToggle.addEventListener('change', () => {
+    resetSelectionAnchor();
+    applyTableViewFilter();
+  });
 }
 
 if (filterForm) {
@@ -850,6 +878,12 @@ if (selectVisibleCheckbox) {
 }
 
 for (const checkbox of sampleCheckboxes()) {
+  checkbox.addEventListener('click', event => {
+    if (event.shiftKey) {
+      extendVisibleSelection(checkbox);
+    }
+    selectionAnchor = checkbox;
+  });
   checkbox.addEventListener('change', () => {
     syncSavedSelectionFromDom();
     applyTableViewFilter();

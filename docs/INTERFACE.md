@@ -40,6 +40,8 @@ Selections are sticky in the browser:
 - selected samples remain selected when table filters change
 - selection is cleared by `Clear`, the page `Reset` link, or a manual page reload
 - `Selected only` restricts the visible table to selected samples
+- clicking one sample checkbox and then Shift-clicking another adds the inclusive range of currently visible rows in the current sort order; selections outside the range remain selected
+- ordinary checkbox clicks add or remove individual samples without requiring Ctrl or Cmd
 - the summary indicators include `Selected N`
 
 Use this to build a collection of samples that cannot be expressed by a single table filter.

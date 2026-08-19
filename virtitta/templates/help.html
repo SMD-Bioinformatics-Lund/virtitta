@@ -81,6 +81,7 @@
       <dt>Select all</dt><dd>Selects every currently visible row. The checkbox in the table header does the same.</dd>
       <dt>Clear</dt><dd>Clears the complete selection, including samples retained from another filtered view.</dd>
       <dt>Selected only</dt><dd>Temporarily hides rows that are not selected.</dd>
+      <dt>Range selection</dt><dd>Click one sample checkbox, then Shift-click another to add every visible row between them in the current table order. Ordinary checkbox clicks can add or remove individual samples.</dd>
       <dt>Columns</dt><dd>Shows or hides table columns. Your last column combination is stored in this browser.</dd>
       {% if config.auth.enabled and request.state.current_user %}<dt>Column presets</dt><dd>Save named column combinations to your account and apply them from the selector.</dd>{% endif %}
       <dt>Export...</dt><dd>Copies the visible table or selected consensus FASTAs, or downloads a LIMS-format text file in the browser.</dd>

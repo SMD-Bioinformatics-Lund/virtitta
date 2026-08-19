@@ -1588,6 +1588,9 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertNotIn('id="client-notice"', rendered)
         self.assertIn("applyTableViewFilter", rendered)
         self.assertIn("addHiddenInputsForFilteredSelection", rendered)
+        self.assertIn("let selectionAnchor = null", rendered)
+        self.assertIn("event.shiftKey", rendered)
+        self.assertIn("extendVisibleSelection(checkbox)", rendered)
 
     def test_index_route_renders_cluster_duplicate_option_when_enabled(self) -> None:
         self.enable_cluster()
