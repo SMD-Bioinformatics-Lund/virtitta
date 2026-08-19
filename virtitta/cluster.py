@@ -322,11 +322,7 @@ def prepare_cluster_files(
     if len(sample_rows) < MIN_CLUSTER_SAMPLES:
         raise ClusterError(f"Select at least {MIN_CLUSTER_SAMPLES} samples for clustering")
 
-    output_dir = cluster_output_dir(config, output_relpath)
-    output_dir.mkdir(parents=True, exist_ok=False)
     artifacts = cluster_artifacts(output_relpath)
-    raw_fasta = config.cluster.output_root / artifacts[ARTIFACT_INPUT_FASTA]
-    metadata_path = config.cluster.output_root / artifacts[ARTIFACT_METADATA]
 
     fasta_records: list[tuple[dict, str, str, str]] = []
     tree_id_counts: dict[str, int] = {}
@@ -351,6 +347,10 @@ def prepare_cluster_files(
         shown = ", ".join(sorted(duplicate_tree_ids))
         warnings.append(f"Duplicate FASTA tree IDs were renamed with run name suffixes: {shown}.")
 
+    output_dir = cluster_output_dir(config, output_relpath)
+    output_dir.mkdir(parents=True, exist_ok=False)
+    raw_fasta = config.cluster.output_root / artifacts[ARTIFACT_INPUT_FASTA]
+    metadata_path = config.cluster.output_root / artifacts[ARTIFACT_METADATA]
     sample_records: list[dict] = []
     seen_tree_ids: set[str] = set()
     with raw_fasta.open("w", encoding="utf-8") as fasta_handle:

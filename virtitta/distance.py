@@ -120,8 +120,6 @@ def prepare_distance_files(
     if len(sample_rows) < MIN_DISTANCE_SAMPLES:
         raise ClusterError(f"Select at least {MIN_DISTANCE_SAMPLES} samples for distance matrices")
 
-    output_dir = cluster_output_dir(config, output_relpath)
-    output_dir.mkdir(parents=True, exist_ok=False)
     artifacts = distance_artifacts(output_relpath)
     records = []
     id_counts: dict[str, int] = {}
@@ -140,6 +138,8 @@ def prepare_distance_files(
     if duplicates and not allow_duplicate_ids:
         raise ClusterError(f"Duplicate FASTA tree ID after normalization: {sorted(duplicates)[0]}")
 
+    output_dir = cluster_output_dir(config, output_relpath)
+    output_dir.mkdir(parents=True, exist_ok=False)
     sample_records = []
     resolved = set()
     iupac_lines = []

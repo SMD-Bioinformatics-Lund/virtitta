@@ -74,6 +74,7 @@ actions.
 When clustering is enabled, `Cluster` opens actions for the selected samples. `Cluster selected` starts a background job
 and keeps duplicate FASTA tree IDs as a blocking warning. `Cluster selected (allow duplicates)` allows duplicated
 normalized FASTA IDs by renaming those duplicated IDs to `<ID>-<run_name>`. At least three samples are required.
+Blocking warnings remain visible until dismissed so validation failures are not lost after a redirect.
 
 The cluster detail page shows job status, warnings, selected sample IDs, and generated artifacts. The metadata file
 contains `ID` plus the configured main-table columns and comment count. Completed jobs expose downloads for the raw

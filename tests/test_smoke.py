@@ -7,6 +7,7 @@ import sqlite3
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -1676,6 +1677,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn('{ message: "Saved", isError: false }', rendered)
         self.assertIn("window.history.replaceState", rendered)
         self.assertNotIn("data-flash-message", rendered)
+        self.assertIn("if (!isError)", rendered)
 
     def test_index_route_renders_annotation_filters_and_optional_groups_column_toggle(self) -> None:
         config = load_config(self.config_path)
@@ -2201,6 +2203,87 @@ class VirtittaSmokeTests(unittest.TestCase):
                 prepare_cluster_files(config, conn, rows, "job1")
         finally:
             conn.close()
+
+    def test_distance_route_redirects_duplicate_ids_with_visible_warning(self) -> None:
+        self.enable_cluster()
+        self.add_second_sample_summary(lid="LID001", tree_id="LID001-0.15-iupac")
+        (self.run_dir / "SAMPLE002/results/SAMPLE002.fasta").write_text(
+            ">SAMPLE002\nACGTAAAA\n", encoding="utf-8"
+        )
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(
+            route for route in app.router.routes
+            if getattr(route, "path", None) == "/distance-matrices"
+        )
+
+        response = asyncio.run(
+            route.endpoint(
+                self.make_request(app, method="POST"),
+                sample_run_id=["SAMPLE001_fixture_run", "SAMPLE002_fixture_run"],
+                redirect_to="/?run_name=fixture_run",
+            )
+        )
+
+        self.assertEqual(response.status_code, 303)
+        location = response.headers["location"]
+        warning = parse_qs(urlsplit(location).query)["warning"][0]
+        self.assertEqual(warning, "Duplicate FASTA tree ID after normalization: LID001")
+        self.assertFalse(config.cluster.output_root.exists())
+
+        index_route = next(
+            route for route in app.router.routes
+            if getattr(route, "path", None) == "/" and "GET" in route.methods
+        )
+        rendered = index_route.endpoint(
+            self.make_request(app, query_string=urlsplit(location).query.encode("utf-8")),
+            search="",
+            run_name="fixture_run",
+            subtype="",
+            qc_status="",
+            warning=warning,
+            notice="",
+            min_coverage_pct="",
+            min_mean_depth="",
+            min_blast_identity="",
+            max_ct="",
+            sort="run_name",
+            desc=True,
+        ).body.decode("utf-8")
+        self.assertIn("Duplicate FASTA tree ID after normalization: LID001", rendered)
+
+    def test_cluster_route_redirects_duplicate_ids_with_visible_warning(self) -> None:
+        self.enable_cluster()
+        self.add_second_sample_summary(lid="LID001", tree_id="LID001-0.15-iupac")
+        self.add_sample_summary(
+            sample_id="SAMPLE003", lid="LID003", tree_id="LID003-0.15-iupac"
+        )
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        route = next(
+            route for route in app.router.routes
+            if getattr(route, "path", None) == "/clusters"
+        )
+
+        response = asyncio.run(
+            route.endpoint(
+                self.make_request(app, method="POST"),
+                sample_run_id=[
+                    "SAMPLE001_fixture_run",
+                    "SAMPLE002_fixture_run",
+                    "SAMPLE003_fixture_run",
+                ],
+                redirect_to="/?run_name=fixture_run",
+            )
+        )
+
+        self.assertEqual(response.status_code, 303)
+        location = response.headers["location"]
+        warning = parse_qs(urlsplit(location).query)["warning"][0]
+        self.assertEqual(warning, "Duplicate FASTA tree ID after normalization: LID001")
+        self.assertFalse(config.cluster.output_root.exists())
 
     def test_prepare_cluster_files_can_suffix_duplicate_tree_ids_with_run_name(self) -> None:
         self.enable_cluster()

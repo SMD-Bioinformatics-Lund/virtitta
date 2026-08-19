@@ -60,7 +60,9 @@
     appToast.classList.toggle('warning-banner', isError);
     appToast.classList.toggle('notice-banner', !isError);
     appToast.setAttribute('role', isError ? 'alert' : 'status');
-    appToastTimer = window.setTimeout(hideAppToast, isError ? 8000 : 4500);
+    if (!isError) {
+      appToastTimer = window.setTimeout(hideAppToast, 4500);
+    }
   };
 
   appToastClose.addEventListener('click', hideAppToast);
