@@ -53,16 +53,8 @@
     <input class="input-small" type="number" step="0.01" name="min_mean_depth" value="{{ min_mean_depth }}" placeholder="Min depth">
     <input class="input-small" type="number" step="0.01" name="min_blast_identity" value="{{ min_blast_identity }}" placeholder="Min BLAST %">
     <input class="input-small" type="number" step="0.01" name="max_ct" value="{{ max_ct }}" placeholder="Max CT">
-    <select name="sort">
-      {% for column in table_columns %}
-      <option value="{{ column }}" {% if column == sort %}selected{% endif %}>{{ column_labels.get(column, column) }}</option>
-      {% endfor %}
-      <option value="comment_count" {% if sort == 'comment_count' %}selected{% endif %}>{{ column_labels.get('comment_count', 'Comments') }}</option>
-    </select>
-    <label class="checkbox-inline">
-      <input type="checkbox" name="desc" value="true" {% if desc %}checked{% endif %}>
-      Descending
-    </label>
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="desc" value="{{ bool_query_value(desc) }}">
     <button type="submit">Apply</button>
     <a class="button-link secondary" href="{{ request.url_for('index') }}" data-selection-reset>Reset</a>
   </form>
