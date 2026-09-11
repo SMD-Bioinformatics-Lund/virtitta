@@ -4105,6 +4105,33 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("warning=", save_response.headers["location"])
         self.assertFalse(list((self.root / "lims_exports").glob("*/*.txt")))
 
+    def test_lims_export_cancel_respects_application_root_path(self) -> None:
+        write_test_config(
+            self.config_path,
+            root=self.root,
+            db_path=self.db_path,
+            root_path="/virtitta",
+        )
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        route = next(
+            route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/lims-export"
+        )
+        response = route.endpoint(
+            self.make_request(app, path="/samples/SAMPLE001_fixture_run/lims-export", root_path="/virtitta"),
+            "SAMPLE001_fixture_run",
+            redirect_to="/",
+        )
+
+        self.assertIn('href="/virtitta/">Cancel</a>', response.body.decode("utf-8"))
+
     def test_lims_delivery_failure_keeps_local_archive(self) -> None:
         unavailable = self.root / "missing_lims_ingest"
         self.config_path.write_text(

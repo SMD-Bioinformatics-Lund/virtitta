@@ -33,7 +33,7 @@
     {% if config.auth.enabled %}<input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">{% endif %}
     <button type="submit" name="save_target" value="lims"{% if not lims_enabled %} disabled{% endif %}>Save to LIMS</button>
     <button type="submit" name="save_target" value="local" class="secondary"{% if not local_enabled %} disabled{% endif %}>Save local only</button>
-    <a class="button-link secondary" href="{{ redirect_to }}">Cancel</a>
+    <a class="button-link secondary" href="{{ cancel_url }}">Cancel</a>
   </form>
 </section>
 {% endblock %}

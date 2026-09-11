@@ -952,6 +952,16 @@ def safe_local_redirect(url: str | None, default: str = "/") -> str:
     return urlunsplit(("", "", parts.path, parts.query, parts.fragment))
 
 
+def root_path_local_url(url: str, root_path: str) -> str:
+    if not root_path:
+        return url
+    parts = urlsplit(url)
+    if parts.path == root_path or parts.path.startswith(f"{root_path}/"):
+        return url
+    path = f"{root_path}{parts.path}"
+    return urlunsplit(("", "", path, parts.query, parts.fragment))
+
+
 def build_igv_url(config: Config, sample_row, outputs: dict | None = None) -> str:
     if not config.features.igv or not config.igv.enabled:
         raise HTTPException(status_code=404, detail="IGV integration is disabled")
@@ -1662,6 +1672,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         warning_message: str = "",
     ):
         content = build_lims_export_content(config, sample_rows)
+        safe_redirect_to = safe_local_redirect(redirect_to)
         return templates.TemplateResponse(
             request,
             "lims_export_preview.html",
@@ -1671,7 +1682,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "sample_rows": sample_rows,
                 "content": content,
                 "preview_digest": lims_preview_digest(content),
-                "redirect_to": safe_local_redirect(redirect_to),
+                "redirect_to": safe_redirect_to,
+                "cancel_url": root_path_local_url(safe_redirect_to, config.app.root_path),
                 "local_enabled": config.exports.lims_root is not None,
                 "local_destination": (
                     config.exports.lims_root / datetime.now().date().isoformat()
