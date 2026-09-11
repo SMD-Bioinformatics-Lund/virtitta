@@ -46,6 +46,7 @@ restricted_sample_categories = ["test"]
 
 [exports]
 lims_root = "data/lims_exports"
+lims_ingest_root = "/media/MLU-CMD-NGS/"
 
 [imports]
 clarity_metadata_root = "/fs2/seqdata/clarity/done"

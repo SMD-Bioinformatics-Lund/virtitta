@@ -162,6 +162,7 @@ class AnnotationSettings:
 @dataclass(frozen=True)
 class ExportSettings:
     lims_root: Path | None = None
+    lims_ingest_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -397,7 +398,15 @@ def load_config(config_path: str | Path | None = None) -> Config:
                 else Path(exports_raw["lims_root"]).resolve()
             )
             if exports_raw.get("lims_root")
-            else None
+            else None,
+            lims_ingest_root=(
+                (base_dir / exports_raw["lims_ingest_root"]).resolve()
+                if exports_raw.get("lims_ingest_root")
+                and not Path(exports_raw["lims_ingest_root"]).is_absolute()
+                else Path(exports_raw["lims_ingest_root"]).resolve()
+            )
+            if exports_raw.get("lims_ingest_root")
+            else None,
         ),
         imports=ImportSettings(
             clarity_metadata_root=(

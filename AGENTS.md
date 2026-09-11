@@ -168,12 +168,12 @@ python -m compileall virtitta
 - If a feature needs files written automatically into a designated directory, be explicit whether that means:
   - client-side download behavior, which is browser-controlled, or
   - server-side export behavior, which can be implemented with a configured server path.
-- Current LIMS behavior supports server-side writing when `exports.lims_root` is configured:
-  - the default export action writes to the server-side path
-  - write under `<lims_root>/<YYYY-MM-DD>/`
+- Current LIMS behavior previews the exact content before server-side writing:
+  - `Save local only` writes under `<lims_root>/<YYYY-MM-DD>/`
+  - `Save to LIMS` writes the same unique file to the local archive and directly under `exports.lims_ingest_root`
   - avoid overwriting existing files by creating a unique filename
   - browser download is a separate explicit alternative, not the default action
-  - show user feedback after export so the operator can see that the write completed
+  - show user feedback after export so the operator can see which writes completed
 - The main table export dropdown also supports clipboard-oriented exports:
   - visible table content
   - selected export FASTA records

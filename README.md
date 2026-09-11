@@ -45,6 +45,8 @@ Important settings:
   - where the SQLite database is stored
 - `exports.lims_root`
   - optional server-side export root for LIMS files
+- `exports.lims_ingest_root`
+  - optional flat directory watched by LIMS for automatic ingestion
 - `cache.outputs_root` and `cache.output_keys`
   - local cache for small post-import artifacts such as clipboard FASTA files and the rug/KDE image
 - `auth.enabled`
@@ -76,6 +78,7 @@ path = "data/virtitta.sqlite3"
 
 [exports]
 lims_root = "data/lims_exports"
+lims_ingest_root = ""
 
 [auth]
 enabled = false
@@ -320,11 +323,13 @@ Export is blocked if any selected sample is still `unreviewed`.
 
 Save location behavior:
 
-- the default `Export LIMS` action writes the export on the server under:
-  - `<lims_root>/<YYYY-MM-DD>/`
+- `Export LIMS` first opens a preview of the exact TSV content
+- `Save local only` writes the export under `<lims_root>/<YYYY-MM-DD>/`
+- `Save to LIMS` writes the same uniquely named file to the local archive and directly under `lims_ingest_root`
 - repeated exports on the same day keep unique filenames instead of overwriting earlier ones
+- if LIMS delivery fails after local archival, the local copy is kept and the operator is warned
 - browser download remains available as an explicit alternative from the export dropdown
-- if `exports.lims_root` is not configured, the default export action reports that as a warning instead of silently failing
+- save buttons are disabled when their required export roots are not configured
 - the main table export dropdown also supports clipboard export of:
   - the currently visible main table
   - selected FASTA records, with LID or sample ID headers

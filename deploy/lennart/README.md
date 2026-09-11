@@ -12,6 +12,9 @@ $EDITOR .env
 
 Set `VIRTITTA_DATA` to an absolute persistent-data path writable by `VIRTITTA_UID:VIRTITTA_GID`. Add `apache.conf` to the existing TLS virtual host and reload Apache. Install `virtitta.service` under `/etc/systemd/system/`, then run `systemctl daemon-reload` and enable it.
 
+The LIMS ingest directory `/media/MLU-CMD-NGS` is mounted read-write into the container. Ensure it is mounted on the
+host and writable by `VIRTITTA_UID:VIRTITTA_GID` before starting Virtitta.
+
 ## Deploy a build
 
 On the development machine:

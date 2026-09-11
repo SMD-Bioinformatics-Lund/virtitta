@@ -202,6 +202,34 @@ a:hover {
   white-space: pre;
 }
 
+.lims-preview-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.lims-preview-content {
+  width: 100%;
+  min-height: 280px;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  white-space: pre;
+}
+
+.compact-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.compact-details dt {
+  font-weight: 700;
+}
+
+.compact-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .webigv-panel {
   padding: 4px;
 }

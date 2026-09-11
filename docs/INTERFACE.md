@@ -99,13 +99,20 @@ The export menu supports:
 - selected 15% IUPAC FASTA records to clipboard
 - browser LIMS download
 
-The default `Export LIMS` action writes server-side files under:
+`Export LIMS` opens a confirmation page showing the exact TSV content. From there:
+
+- `Save local only` writes under:
 
 ```text
 <exports.lims_root>/<YYYY-MM-DD>/
 ```
 
-Repeated exports create unique filenames instead of overwriting existing files.
+- `Save to LIMS` writes the same uniquely named file to that local archive and directly under
+  `exports.lims_ingest_root`, where it can be ingested automatically
+- `Cancel` returns without writing a file
+
+Repeated exports create unique filenames instead of overwriting existing files. If automatic delivery fails after
+the local copy is written, Virtitta keeps the local copy and reports the failed LIMS delivery.
 
 The FASTA clipboard exports use canonical `main_fasta` and `iupac_fasta` outputs, falling back to legacy `export_*`
 outputs for older imports. The export menu lets the operator choose LID or sample ID headers; LID is the default.

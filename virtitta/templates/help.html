@@ -85,7 +85,7 @@
       <dt>Columns</dt><dd>Shows or hides table columns. Your last column combination is stored in this browser.</dd>
       {% if config.auth.enabled and request.state.current_user %}<dt>Column presets</dt><dd>Save named column combinations to your account and apply them from the selector.</dd>{% endif %}
       <dt>Export...</dt><dd>Copies the visible table or selected consensus FASTAs, or downloads a LIMS-format text file in the browser.</dd>
-      {% if permissions.export_lims %}<dt>Export LIMS</dt><dd>Writes the selected LIMS results to the configured server-side export directory.</dd>{% endif %}
+      {% if permissions.export_lims %}<dt>Export LIMS</dt><dd>Previews the selected LIMS results, then saves them locally or to both the local archive and automatic LIMS ingest directory.</dd>{% endif %}
       {% if permissions.qc_update or permissions.category_update or permissions.sample_delete %}<dt>Manage...</dt><dd>Contains the permitted QC, category, and deletion actions described below.</dd>{% endif %}
       {% if permissions.group_update %}<dt>Add/Remove group</dt><dd>Adds the selected samples to a named manual group or removes them from it.</dd>{% endif %}
       {% if cluster_enabled %}<dt>Cluster... / Distance...</dt><dd>Starts the analyses described later on this page for the selected samples.</dd>{% endif %}

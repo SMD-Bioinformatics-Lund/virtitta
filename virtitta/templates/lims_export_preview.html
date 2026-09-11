@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel lims-preview-panel">
+  <div class="split-header">
+    <div>
+      <h2>LIMS export preview</h2>
+      <div class="meta-line">{{ sample_rows|length }} sample{% if sample_rows|length != 1 %}s{% endif %}</div>
+    </div>
+  </div>
+
+  <p class="muted">Review the exact tab-separated content before choosing where to save it.</p>
+  <textarea class="lims-preview-content" rows="18" spellcheck="false" readonly>{{ content }}</textarea>
+
+  <dl class="compact-details">
+    <dt>Local archive</dt>
+    <dd>{% if local_enabled %}{{ local_destination }}{% else %}Not configured{% endif %}</dd>
+    <dt>Automatic LIMS ingest</dt>
+    <dd>{% if config.exports.lims_ingest_root %}{{ config.exports.lims_ingest_root }}{% else %}Not configured{% endif %}</dd>
+  </dl>
+
+  {% if not local_enabled %}
+  <p class="warning-inline">Configure <code>exports.lims_root</code> before saving an export.</p>
+  {% elif not lims_enabled %}
+  <p class="warning-inline">Configure <code>exports.lims_ingest_root</code> to enable automatic LIMS delivery.</p>
+  {% endif %}
+
+  <form method="post" action="{{ request.url_for('save_lims_export') }}" class="button-row">
+    {% for sample in sample_rows %}
+    <input type="hidden" name="sample_run_id" value="{{ sample['sample_run_id'] }}">
+    {% endfor %}
+    <input type="hidden" name="preview_digest" value="{{ preview_digest }}">
+    <input type="hidden" name="redirect_to" value="{{ redirect_to }}">
+    {% if config.auth.enabled %}<input type="hidden" name="csrf_token" value="{{ request.state.current_user.csrf_token }}">{% endif %}
+    <button type="submit" name="save_target" value="lims"{% if not lims_enabled %} disabled{% endif %}>Save to LIMS</button>
+    <button type="submit" name="save_target" value="local" class="secondary"{% if not local_enabled %} disabled{% endif %}>Save local only</button>
+    <a class="button-link secondary" href="{{ redirect_to }}">Cancel</a>
+  </form>
+</section>
+{% endblock %}

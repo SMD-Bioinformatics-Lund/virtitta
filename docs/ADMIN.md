@@ -30,13 +30,25 @@ Important sections:
 - `[app]`: title, bind address, port, and optional reverse-proxy `root_path`
 - `[database]`: SQLite database path
 - `[results_roots]`: Linux and Windows-visible VirPipa result roots
-- `[exports]`: server-side LIMS export root
+- `[exports]`: local LIMS archive root and optional automatic-ingest root
 - `[cache]`: local cache for small imported artifacts
 - `[auth]`: optional local login and session settings
 - `[webigv]`: optional browser IGV fallback settings
 - `[cluster]`: optional selected-sample clustering settings
 - `[annotations]`: assignable sample categories and optional restricted categories
 - `[ui]`: table columns, defaults, labels, width caps, and highlight rules
+
+Configure LIMS destinations independently:
+
+```toml
+[exports]
+lims_root = "data/lims_exports"
+lims_ingest_root = "/path/to/lims/watched-directory"
+```
+
+The local root receives dated archive directories. The ingest root is optional and receives files directly, without
+a dated subdirectory. When Virtitta runs in a container, mount the ingest directory read-write at the configured
+container path and ensure the container UID/GID can create and rename files there.
 
 Start from `virtitta.example.toml` for new deployments.
 

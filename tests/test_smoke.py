@@ -33,6 +33,7 @@ from virtitta.app import (
     override_comment_text,
     request_path_without_root_path,
     table_columns,
+    lims_preview_digest,
 )
 from virtitta.artifact_cache import CACHE_OK, CACHE_STALE, verify_sample_cache
 from virtitta.auth import create_login_session, disabled_auth_user, hash_password
@@ -92,6 +93,7 @@ def write_test_config(config_path: Path, *, root: Path, db_path: Path, root_path
                 "",
                 "[exports]",
                 f'lims_root = "{(root / "lims_exports").as_posix()}"',
+                f'lims_ingest_root = "{(root / "lims_ingest").as_posix()}"',
                 "",
                 "[igv]",
                 "enabled = true",
@@ -449,6 +451,7 @@ class VirtittaSmokeTests(unittest.TestCase):
 
         self.config_path = self.tmp_path / "virtitta.toml"
         self.db_path = self.tmp_path / "virtitta.sqlite3"
+        (self.root / "lims_ingest").mkdir()
         write_test_config(self.config_path, root=self.root, db_path=self.db_path)
 
     def tearDown(self) -> None:
@@ -1425,6 +1428,19 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(table_columns(config), config.ui.table_columns)
         self.assertIn("sequencing_date", config.ui.visible_columns)
         self.assertIn("sample_category", config.ui.visible_columns)
+
+    def test_load_config_resolves_relative_lims_ingest_root(self) -> None:
+        self.config_path.write_text(
+            self.config_path.read_text(encoding="utf-8").replace(
+                (self.root / "lims_ingest").as_posix(),
+                "relative_lims_ingest",
+            ),
+            encoding="utf-8",
+        )
+
+        config = load_config(self.config_path)
+
+        self.assertEqual(config.exports.lims_ingest_root, self.tmp_path / "relative_lims_ingest")
         self.assertIn("sample_metadata_classification", config.ui.visible_columns)
         self.assertIn("manual_groups", config.ui.visible_columns)
         self.assertNotIn("qc_coverage_1000x_pct", config.ui.visible_columns)
@@ -3869,7 +3885,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("/samples/SAMPLE001_fixture_run", response.headers["location"])
         self.assertIn("warning=", response.headers["location"])
 
-    def test_single_sample_lims_export_writes_server_file_and_redirects_with_notice(self) -> None:
+    def test_single_sample_lims_export_previews_without_writing(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
         conn = connect(config.database.path)
@@ -3884,13 +3900,11 @@ class VirtittaSmokeTests(unittest.TestCase):
         )
         response = route.endpoint(self.make_request(app), "SAMPLE001_fixture_run")
 
-        self.assertEqual(response.status_code, 303)
-        self.assertIn("notice=", response.headers["location"])
-
-        export_root = self.root / "lims_exports"
-        exported = list(export_root.glob("*/*.txt"))
-        self.assertEqual(len(exported), 1)
-        self.assertIn("LID001\thcvqc\tPassed\t", exported[0].read_text(encoding="utf-8"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.template.name, "lims_export_preview.html")
+        self.assertIn("LID001\thcvqc\tPassed\t", response.context["content"])
+        self.assertFalse(list((self.root / "lims_exports").glob("*/*.txt")))
+        self.assertFalse(list((self.root / "lims_ingest").glob("*.txt")))
 
     def test_single_sample_lims_export_download_returns_attachment(self) -> None:
         config = load_config(self.config_path)
@@ -3928,7 +3942,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("/?run_name=fixture_run", response.headers["location"])
         self.assertIn("warning=", response.headers["location"])
 
-    def test_bulk_lims_export_writes_server_file_and_redirects_with_notice(self) -> None:
+    def test_bulk_lims_export_previews_without_writing(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
         conn = connect(config.database.path)
@@ -3947,8 +3961,186 @@ class VirtittaSmokeTests(unittest.TestCase):
             )
         )
 
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.template.name, "lims_export_preview.html")
+        rendered = response.body.decode("utf-8")
+        self.assertIn("Save to LIMS", rendered)
+        self.assertIn("Save local only", rendered)
+        self.assertIn(">Cancel</a>", rendered)
+        self.assertFalse(list((self.root / "lims_exports").glob("*/*.txt")))
+
+    def test_lims_export_save_local_only_writes_archive(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        preview_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/lims-export")
+        save_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/lims-export/save")
+        preview = asyncio.run(
+            preview_route.endpoint(
+                self.make_request(app, method="POST"),
+                sample_run_id=["SAMPLE001_fixture_run"],
+                redirect_to="/?run_name=fixture_run",
+            )
+        )
+        response = asyncio.run(
+            save_route.endpoint(
+                self.make_request(app, method="POST"),
+                sample_run_id=["SAMPLE001_fixture_run"],
+                save_target="local",
+                preview_digest=preview.context["preview_digest"],
+                redirect_to="/?run_name=fixture_run",
+            )
+        )
+
         self.assertEqual(response.status_code, 303)
         self.assertIn("notice=", response.headers["location"])
+        self.assertEqual(len(list((self.root / "lims_exports").glob("*/*.txt"))), 1)
+        self.assertFalse(list((self.root / "lims_ingest").glob("*.txt")))
+
+    def test_lims_export_save_to_lims_writes_identical_files(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        save_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/lims-export/save")
+        assert sample is not None
+        content = build_lims_export_content(config, [sample])
+        response = asyncio.run(
+            save_route.endpoint(
+                self.make_request(app, method="POST"),
+                sample_run_id=["SAMPLE001_fixture_run"],
+                save_target="lims",
+                preview_digest=lims_preview_digest(content),
+                redirect_to="/",
+            )
+        )
+
+        local_files = list((self.root / "lims_exports").glob("*/*.txt"))
+        ingest_files = list((self.root / "lims_ingest").glob("*.txt"))
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("notice=", response.headers["location"])
+        self.assertEqual(len(local_files), 1)
+        self.assertEqual(len(ingest_files), 1)
+        self.assertEqual(local_files[0].name, ingest_files[0].name)
+        self.assertEqual(local_files[0].read_text(encoding="utf-8"), content)
+        self.assertEqual(ingest_files[0].read_text(encoding="utf-8"), content)
+
+    def test_lims_export_changed_after_preview_requires_confirmation(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        save_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/lims-export/save")
+        response = asyncio.run(
+            save_route.endpoint(
+                self.make_request(app, method="POST"),
+                sample_run_id=["SAMPLE001_fixture_run"],
+                save_target="lims",
+                preview_digest="stale",
+                redirect_to="/",
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("changed after it was previewed", response.context["warning_message"])
+        self.assertFalse(list((self.root / "lims_exports").glob("*/*.txt")))
+        self.assertFalse(list((self.root / "lims_ingest").glob("*.txt")))
+
+    def test_lims_export_without_ingest_config_disables_lims_button(self) -> None:
+        self.config_path.write_text(
+            self.config_path.read_text(encoding="utf-8").replace(
+                f'lims_ingest_root = "{(self.root / "lims_ingest").as_posix()}"\n',
+                "",
+            ),
+            encoding="utf-8",
+        )
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        app = create_app(self.config_path)
+        route = next(
+            route for route in app.router.routes if getattr(route, "path", None) == "/samples/{sample_run_id}/lims-export"
+        )
+        response = route.endpoint(self.make_request(app), "SAMPLE001_fixture_run")
+
+        rendered = response.body.decode("utf-8")
+        self.assertIn('name="save_target" value="lims" disabled', rendered)
+        self.assertIn("exports.lims_ingest_root", rendered)
+
+        assert sample is not None
+        save_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/lims-export/save")
+        save_response = asyncio.run(
+            save_route.endpoint(
+                self.make_request(app, method="POST"),
+                sample_run_id=["SAMPLE001_fixture_run"],
+                save_target="lims",
+                preview_digest=lims_preview_digest(build_lims_export_content(config, [sample])),
+                redirect_to="/",
+            )
+        )
+        self.assertEqual(save_response.status_code, 303)
+        self.assertIn("warning=", save_response.headers["location"])
+        self.assertFalse(list((self.root / "lims_exports").glob("*/*.txt")))
+
+    def test_lims_delivery_failure_keeps_local_archive(self) -> None:
+        unavailable = self.root / "missing_lims_ingest"
+        self.config_path.write_text(
+            self.config_path.read_text(encoding="utf-8").replace(
+                (self.root / "lims_ingest").as_posix(),
+                unavailable.as_posix(),
+            ),
+            encoding="utf-8",
+        )
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+            sample = get_sample(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+
+        assert sample is not None
+        content = build_lims_export_content(config, [sample])
+        app = create_app(self.config_path)
+        save_route = next(route for route in app.router.routes if getattr(route, "path", None) == "/samples/lims-export/save")
+        response = asyncio.run(
+            save_route.endpoint(
+                self.make_request(app, method="POST"),
+                sample_run_id=["SAMPLE001_fixture_run"],
+                save_target="lims",
+                preview_digest=lims_preview_digest(content),
+                redirect_to="/",
+            )
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("warning=", response.headers["location"])
+        self.assertEqual(len(list((self.root / "lims_exports").glob("*/*.txt"))), 1)
+        self.assertFalse(unavailable.exists())
 
     def test_bulk_lims_export_download_returns_attachment(self) -> None:
         config = load_config(self.config_path)

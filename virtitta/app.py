@@ -863,7 +863,12 @@ def timestamped_lims_export_filename(sample_rows: list[dict], timestamp: str) ->
     return f"{stem}-{timestamp}{suffix}"
 
 
-def write_server_lims_export(config: Config, sample_rows: list[dict], content: str) -> Path | None:
+def write_server_lims_export(
+    config: Config,
+    sample_rows: list[dict],
+    content: str,
+    additional_collision_root: Path | None = None,
+) -> Path | None:
     if config.exports.lims_root is None:
         return None
 
@@ -876,12 +881,40 @@ def write_server_lims_export(config: Config, sample_rows: list[dict], content: s
     stem = candidate.stem
     suffix = candidate.suffix
     counter = 2
-    while candidate.exists():
+    while candidate.exists() or (
+        additional_collision_root is not None
+        and (additional_collision_root / candidate.name).exists()
+    ):
         candidate = export_dir / f"{stem}-{counter}{suffix}"
         counter += 1
 
     candidate.write_text(content, encoding="utf-8")
     return candidate
+
+
+def write_lims_ingest_export(config: Config, filename: str, content: str) -> Path | None:
+    if config.exports.lims_ingest_root is None:
+        return None
+
+    export_dir = config.exports.lims_ingest_root
+    if not export_dir.is_dir():
+        raise FileNotFoundError(f"LIMS ingest directory is unavailable: {export_dir}")
+
+    candidate = export_dir / filename
+    if candidate.exists():
+        raise FileExistsError(f"LIMS ingest file already exists: {candidate}")
+
+    temporary = export_dir / f".{filename}.{secrets.token_hex(8)}.tmp"
+    try:
+        temporary.write_text(content, encoding="utf-8")
+        os.replace(temporary, candidate)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return candidate
+
+
+def lims_preview_digest(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def append_warning(url: str, message: str) -> str:
@@ -1622,6 +1655,38 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             connection.close()
         return RedirectResponse(request_url_without_messages(redirect_to), status_code=303)
 
+    def lims_export_preview_response(
+        request: Request,
+        sample_rows: list[dict],
+        redirect_to: str,
+        warning_message: str = "",
+    ):
+        content = build_lims_export_content(config, sample_rows)
+        return templates.TemplateResponse(
+            request,
+            "lims_export_preview.html",
+            {
+                "request": request,
+                "config": config,
+                "sample_rows": sample_rows,
+                "content": content,
+                "preview_digest": lims_preview_digest(content),
+                "redirect_to": safe_local_redirect(redirect_to),
+                "local_enabled": config.exports.lims_root is not None,
+                "local_destination": (
+                    config.exports.lims_root / datetime.now().date().isoformat()
+                    if config.exports.lims_root is not None
+                    else None
+                ),
+                "lims_enabled": (
+                    config.exports.lims_root is not None
+                    and config.exports.lims_ingest_root is not None
+                ),
+                "warning_message": warning_message,
+                "notice_message": "",
+            },
+        )
+
     @app.post("/samples/lims-export")
     async def bulk_lims_export(
         request: Request,
@@ -1631,8 +1696,9 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     ):
         require_permission(request, PERMISSION_EXPORT_LIMS)
         require_csrf(request, csrf_token)
+        redirect_url = safe_local_redirect(redirect_to)
         if not sample_run_id:
-            return RedirectResponse(redirect_to, status_code=303)
+            return RedirectResponse(redirect_url, status_code=303)
 
         sample_rows = load_sample_rows(config, sample_run_id, request)
 
@@ -1640,19 +1706,94 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="No matching samples found")
         if any(row.get("qc_status") == "unreviewed" for row in sample_rows):
             return RedirectResponse(
-                append_warning(redirect_to, "LIMS export is blocked for unreviewed samples."),
+                append_warning(redirect_url, "LIMS export is blocked for unreviewed samples."),
+                status_code=303,
+            )
+
+        return lims_export_preview_response(request, sample_rows, redirect_url)
+
+    @app.post("/samples/lims-export/save")
+    async def save_lims_export(
+        request: Request,
+        sample_run_id: list[str] = Form(default=[]),
+        save_target: str = Form(default=""),
+        preview_digest: str = Form(default=""),
+        redirect_to: str = Form(default="/"),
+        csrf_token: str = Form(default=""),
+    ):
+        require_permission(request, PERMISSION_EXPORT_LIMS)
+        require_csrf(request, csrf_token)
+        redirect_url = safe_local_redirect(redirect_to)
+        if save_target not in {"lims", "local"}:
+            raise HTTPException(status_code=400, detail="Invalid LIMS export target")
+        if not sample_run_id:
+            return RedirectResponse(redirect_url, status_code=303)
+
+        sample_rows = load_sample_rows(config, sample_run_id, request)
+        if not sample_rows:
+            raise HTTPException(status_code=404, detail="No matching samples found")
+        if any(row.get("qc_status") == "unreviewed" for row in sample_rows):
+            return RedirectResponse(
+                append_warning(redirect_url, "LIMS export is blocked for unreviewed samples."),
                 status_code=303,
             )
 
         content = build_lims_export_content(config, sample_rows)
-        export_path = write_server_lims_export(config, sample_rows, content)
-        if export_path is None:
+        if not preview_digest or not secrets.compare_digest(preview_digest, lims_preview_digest(content)):
+            return lims_export_preview_response(
+                request,
+                sample_rows,
+                redirect_url,
+                "The export changed after it was previewed. Review the updated content before saving.",
+            )
+
+        if config.exports.lims_root is None:
             return RedirectResponse(
-                append_warning(redirect_to, "No server-side LIMS export root is configured."),
+                append_warning(redirect_url, "No local LIMS export root is configured."),
                 status_code=303,
             )
+        if save_target == "lims" and config.exports.lims_ingest_root is None:
+            return RedirectResponse(
+                append_warning(redirect_url, "No automatic LIMS ingest root is configured."),
+                status_code=303,
+            )
+
+        try:
+            local_path = write_server_lims_export(
+                config,
+                sample_rows,
+                content,
+                config.exports.lims_ingest_root if save_target == "lims" else None,
+            )
+        except OSError as exc:
+            return RedirectResponse(
+                append_warning(redirect_url, f"Local LIMS export failed: {exc}"),
+                status_code=303,
+            )
+        assert local_path is not None
+
+        if save_target == "local":
+            return RedirectResponse(
+                append_notice(redirect_url, f"LIMS export written locally to {local_path}"),
+                status_code=303,
+            )
+
+        try:
+            ingest_path = write_lims_ingest_export(config, local_path.name, content)
+        except OSError as exc:
+            return RedirectResponse(
+                append_warning(
+                    redirect_url,
+                    f"Local export written to {local_path}, but delivery to LIMS failed: {exc}",
+                ),
+                status_code=303,
+            )
+        assert ingest_path is not None
         return RedirectResponse(
-            append_notice(redirect_to, f"LIMS export written to {export_path}"),
+            append_notice(
+                redirect_url,
+                f"LIMS export written to {local_path} and delivered to {ingest_path}",
+            ),
             status_code=303,
         )
 
@@ -2350,8 +2491,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             redirect_url = append_warning(redirect_url, " ".join(report.warnings))
         return RedirectResponse(redirect_url, status_code=303)
 
-    @app.get("/samples/{sample_run_id}/lims-export")
-    def sample_lims_export(request: Request, sample_run_id: str):
+    @app.get("/samples/{sample_run_id}/lims-export", response_class=HTMLResponse)
+    def sample_lims_export(
+        request: Request,
+        sample_run_id: str,
+        redirect_to: str = "",
+    ):
         require_permission(request, PERMISSION_EXPORT_LIMS)
         connection = connect(config.database.path)
         try:
@@ -2363,25 +2508,16 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if sample_row.get("qc_status") == "unreviewed":
             return RedirectResponse(
                 append_warning(
-                    f"/samples/{sample_run_id}",
+                    safe_local_redirect(redirect_to, f"/samples/{sample_run_id}"),
                     "LIMS export is blocked until QC is marked pass or fail.",
                 ),
                 status_code=303,
             )
 
-        content = build_lims_export_content(config, [sample_row])
-        export_path = write_server_lims_export(config, [sample_row], content)
-        if export_path is None:
-            return RedirectResponse(
-                append_warning(
-                    f"/samples/{sample_run_id}",
-                    "No server-side LIMS export root is configured.",
-                ),
-                status_code=303,
-            )
-        return RedirectResponse(
-            append_notice(f"/samples/{sample_run_id}", f"LIMS export written to {export_path}"),
-            status_code=303,
+        return lims_export_preview_response(
+            request,
+            [sample_row],
+            safe_local_redirect(redirect_to, f"/samples/{sample_run_id}"),
         )
 
     @app.get("/samples/{sample_run_id}/lims-export/download")
