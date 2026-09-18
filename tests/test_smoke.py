@@ -7,7 +7,7 @@ import sqlite3
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -36,7 +36,7 @@ from virtitta.app import (
     lims_preview_digest,
 )
 from virtitta.artifact_cache import CACHE_OK, CACHE_STALE, verify_sample_cache
-from virtitta.auth import create_login_session, disabled_auth_user, hash_password
+from virtitta.auth import authenticate_local_user, create_login_session, disabled_auth_user, get_user_from_cookie, hash_password
 from virtitta.cli import build_parser
 from virtitta.cluster import ClusterError, cluster_artifacts, prepare_cluster_files, run_cluster_job
 from virtitta.config import load_config
@@ -3123,6 +3123,76 @@ class VirtittaSmokeTests(unittest.TestCase):
         response = route.endpoint(self.make_request(app), "SAMPLE001_fixture_run")
 
         self.assertIn("using unverified cached copies for: main_fasta", response.body.decode("utf-8"))
+
+    def test_account_password_change_for_every_role(self) -> None:
+        write_test_config(self.config_path, root=self.tmp_path, db_path=self.db_path, root_path="/virtitta")
+        self.enable_auth()
+        app = create_app(self.config_path)
+        config = load_config(self.config_path)
+        page = next(route for route in app.routes if getattr(route, "path", None) == "/account")
+        change = next(route for route in app.routes if getattr(route, "path", None) == "/account/password")
+        self.create_local_user("other", "viewer")
+        other_token, _ = self.login_local_user("other")
+        for role in ("admin", "reviewer", "commenter", "viewer"):
+            with self.subTest(role=role):
+                self.create_local_user(role, role)
+                token, user = self.login_local_user(role)
+                second_token, _ = self.login_local_user(role)
+                request = self.make_request(app, path="/account", root_path="/virtitta")
+                request.state.current_user = user
+                rendered = page.endpoint(request).body.decode()
+                self.assertIn(f"Username: <strong>{role}</strong>", rendered)
+                self.assertIn(f"User category: <strong>{role}</strong>", rendered)
+                self.assertIn('href="http://testserver/virtitta/account"', rendered)
+                self.assertIn('action="http://testserver/virtitta/account/password"', rendered)
+                self.assertIn('autocomplete="current-password"', rendered)
+                for current, new, confirmation, message in (
+                    ("wrong", "new-secret", "new-secret", "Current password is incorrect."),
+                    ("secret", "", "", "New password cannot be empty."),
+                    ("secret", "new-secret", "different", "New passwords do not match."),
+                ):
+                    response = change.endpoint(request, current, new, confirmation, user.csrf_token)
+                    self.assertEqual(response.status_code, 303)
+                    self.assertIn("/virtitta/account?", response.headers["location"])
+                    self.assertIn(urlencode({"warning": message}), response.headers["location"])
+                    self.assertIsNotNone(authenticate_local_user(config, role, "secret"))
+                    self.assertIsNotNone(get_user_from_cookie(config, token))
+                    error_page = page.endpoint(request, warning=message).body.decode()
+                    self.assertIn(message, error_page)
+                    self.assertNotIn('value="new-secret"', error_page)
+                for csrf in ("", "invalid"):
+                    with self.assertRaises(HTTPException) as error:
+                        change.endpoint(request, "secret", "new-secret", "new-secret", csrf)
+                    self.assertEqual(error.exception.status_code, 403)
+                response = change.endpoint(request, "secret", "new-secret", "new-secret", user.csrf_token)
+                self.assertEqual(response.status_code, 303)
+                self.assertIn("/virtitta/login?notice=Password+changed.", response.headers["location"])
+                self.assertIn("Max-Age=0", response.headers["set-cookie"])
+                self.assertIn("Path=/virtitta", response.headers["set-cookie"])
+                self.assertIsNone(authenticate_local_user(config, role, "secret"))
+                self.assertIsNotNone(authenticate_local_user(config, role, "new-secret"))
+                self.assertIsNone(get_user_from_cookie(config, token))
+                self.assertIsNone(get_user_from_cookie(config, second_token))
+                self.assertIsNotNone(get_user_from_cookie(config, other_token))
+                self.assertIsNotNone(authenticate_local_user(config, "other", "secret"))
+
+    def test_account_requires_authentication(self) -> None:
+        app = create_app(self.config_path)
+        page = next(route for route in app.routes if getattr(route, "path", None) == "/account")
+        change = next(route for route in app.routes if getattr(route, "path", None) == "/account/password")
+        request = self.make_user_request(app, disabled_auth_user())
+        for endpoint in (page.endpoint, change.endpoint):
+            with self.assertRaises(HTTPException) as error:
+                endpoint(request)
+            self.assertEqual(error.exception.status_code, 401)
+        help_route = next(route for route in app.routes if getattr(route, "path", None) == "/help")
+        self.assertNotIn('class="topnav-user"', help_route.endpoint(request).body.decode())
+        self.enable_auth()
+        app = create_app(self.config_path)
+        for path, method, status in (("/account", "GET", 303), ("/account/password", "POST", 401)):
+            messages = self.asgi_request(app, path=path, method=method)
+            start = next(message for message in messages if message["type"] == "http.response.start")
+            self.assertEqual(start["status"], status)
 
     def test_auth_enabled_redirects_anonymous_user_to_login(self) -> None:
         self.enable_auth()

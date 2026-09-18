@@ -37,6 +37,7 @@ from virtitta.auth import (
     create_login_session,
     disabled_auth_user,
     get_user_from_cookie,
+    hash_password,
     logout_session,
 )
 from virtitta.cluster import (
@@ -96,6 +97,7 @@ from virtitta.repository import (
     raw_json_for_sample,
     remove_samples_from_group,
     save_user_column_preset,
+    set_auth_user_password,
     set_sample_category,
     set_sample_field_overrides,
     update_qc_status,
@@ -1262,6 +1264,57 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         require_csrf(request, csrf_token)
         logout_session(config, request.cookies.get(config.auth.cookie_name))
         response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(config.auth.cookie_name, path=config.app.root_path or "/")
+        return response
+
+    @app.get("/account", response_class=HTMLResponse)
+    def account_page(request: Request, warning: str = Query(default="")):
+        current_user = require_authenticated_user(request)
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            {
+                "request": request,
+                "config": config,
+                "current_user": current_user,
+                "warning_message": warning if isinstance(warning, str) else "",
+            },
+        )
+
+    @app.post("/account/password")
+    def change_password(
+        request: Request,
+        current_password: str = Form(default=""),
+        new_password: str = Form(default=""),
+        confirm_password: str = Form(default=""),
+        csrf_token: str = Form(default=""),
+    ):
+        current_user = require_authenticated_user(request)
+        require_csrf(request, csrf_token)
+        if authenticate_local_user(config, current_user.username, current_password) is None:
+            warning = "Current password is incorrect."
+        elif not new_password:
+            warning = "New password cannot be empty."
+        elif new_password != confirm_password:
+            warning = "New passwords do not match."
+        else:
+            warning = ""
+        if warning:
+            return RedirectResponse(append_warning(str(request.url_for("account_page")), warning), status_code=303)
+
+        connection = connect(config.database.path)
+        try:
+            set_auth_user_password(
+                connection,
+                current_user.username,
+                hash_password(new_password, iterations=config.auth.pbkdf2_iterations),
+            )
+        finally:
+            connection.close()
+        response = RedirectResponse(
+            append_notice(str(request.url_for("login_form")), "Password changed. Please log in again."),
+            status_code=303,
+        )
         response.delete_cookie(config.auth.cookie_name, path=config.app.root_path or "/")
         return response
 

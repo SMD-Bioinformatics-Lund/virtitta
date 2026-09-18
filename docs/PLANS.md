@@ -11,4 +11,6 @@ the same change. Keep entries short enough to revisit and prune.
 
 ## Open Plans
 
+- Consider showing names or other profile information on the user account page; currently it shows username, role,
+  and password change only.
 - Benchmark realistic sample counts before adding a distance-matrix size warning or hard limit.

@@ -345,7 +345,11 @@ Change a role:
 python -m virtitta.cli set-user-role --config virtitta.toml --username bob --role viewer
 ```
 
-Reset a password:
+Users in every role can change their own password from the account page by clicking their name in the top navigation.
+This requires their current password and a matching, nonempty new password and confirmation. Changing a password
+invalidates all of that user's sessions, including the current browser, and requires logging in again.
+
+Reset a password (including when the user has forgotten their current password):
 
 ```bash
 python -m virtitta.cli reset-user-password --config virtitta.toml --username bob

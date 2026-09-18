@@ -13,6 +13,13 @@ authentication disabled show all available functions.
 The clustering section explains the MAFFT and IQ-TREE maximum-likelihood workflow. Distance matrices are documented
 separately because they use MAFFT and positional read coverage but do not run IQ-TREE or GrapeTree.
 
+## User Account
+
+Click your name in the top navigation to open your account page. It shows your username and user category (role).
+All signed-in users can change their own password by entering their current password and confirming a nonempty new
+password. A successful change signs you out on all devices and returns you to login with a confirmation message.
+Username and category are read-only. The account link is absent when authentication is disabled.
+
 ## Main Table
 
 The main table is the primary review workspace.
