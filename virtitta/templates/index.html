@@ -287,7 +287,7 @@
                 </div>
               </div>
               {% else %}
-              {% set formatted_value = format_value(value, column) %}
+              {% set formatted_value = format_table_value(value, column) %}
               <span class="cell-content {% if row.get(column ~ '_overridden') %}overridden-value{% endif %}" title="{% if row.get(column ~ '_overridden') %}Imported: {{ format_value(row.get('imported_' ~ column), column) }}{% else %}{{ formatted_value }}{% endif %}">{{ formatted_value }}</span>
               {% endif %}
             </td>

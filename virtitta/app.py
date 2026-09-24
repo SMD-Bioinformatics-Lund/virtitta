@@ -224,7 +224,7 @@ HELP_COLUMN_DESCRIPTIONS = {
     "typing_report_subtype": "HCV subtype reported from the main VirPipa BLAST result.",
     "typing_main_blast_identity": "Percentage identity of the main BLAST typing match.",
     "resistance_summary": "Compact geno2pheno HCV drug-resistance calls; hover for detected mutations.",
-    "host_filter_reads_in": "Number of reads entering host/human read filtering.",
+    "host_filter_reads_in": "Number of read pairs entering host/human read filtering.",
     "host_filter_reads_removed_proportion": "Percentage of input reads removed by host/human filtering.",
     "qc_coverage_pct": "Overall consensus coverage percentage reported by VirPipa.",
     "qc_mean_depth": "Mean read depth across the consensus sequence.",
@@ -269,6 +269,18 @@ def format_value(value: object, column: str | None = None) -> str:
     if isinstance(value, float):
         return f"{value:.4f}".rstrip("0").rstrip(".")
     return str(value)
+
+
+def format_table_value(value: object, column: str) -> str:
+    if column == "host_filter_reads_in" and value is not None:
+        try:
+            reads = int(value)
+        except (TypeError, ValueError):
+            return str(value)
+        pairs, remainder = divmod(reads, 2)
+        formatted = f"{pairs:,}".replace(",", " ")
+        return f"{formatted}.5" if remainder else formatted
+    return format_value(value, column)
 
 
 def display_identifier(row: dict) -> str:
@@ -1474,6 +1486,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "comment_link_label": comment_link_label,
                 "row_class": row_class,
                 "format_value": format_value,
+                "format_table_value": format_table_value,
                 "display_identifier": display_identifier,
                 "bool_query_value": bool_query_value,
                 "index_query_url": lambda **updates: replace_query_params(str(request.url), **updates),
@@ -2267,6 +2280,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "sample_json_pretty": json.dumps(raw, indent=2, sort_keys=True),
                 "comments": comments,
                 "format_value": format_value,
+                "format_table_value": format_table_value,
                 "display_identifier": display_identifier,
                 "igv_url": igv_url,
                 "webigv_url": webigv_url,

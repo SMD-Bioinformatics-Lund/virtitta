@@ -100,7 +100,7 @@
         <tr><th>Sample Submission Signing</th><td>{{ format_value(sample["sample_metadata_sample_submission_signing"]) }}</td></tr>
         <tr><th>Subtype</th><td><span class="{% if sample['typing_report_subtype_overridden'] %}overridden-value{% endif %}" {% if sample['typing_report_subtype_overridden'] %}title="Imported: {{ format_value(sample['imported_typing_report_subtype']) }}"{% endif %}>{{ format_value(sample["typing_report_subtype"]) }}</span></td></tr>
         <tr><th>BLAST %</th><td>{{ format_value(sample["typing_main_blast_identity"], "typing_main_blast_identity") }}</td></tr>
-        <tr><th>Reads In</th><td>{{ format_value(sample["host_filter_reads_in"], "host_filter_reads_in") }}</td></tr>
+        <tr><th>Read pairs</th><td>{{ format_table_value(sample["host_filter_reads_in"], "host_filter_reads_in") }}</td></tr>
         <tr><th>Human</th><td>{{ format_value(sample["host_filter_reads_removed_proportion"], "host_filter_reads_removed_proportion") }}</td></tr>
         <tr><th>Coverage %</th><td>{{ format_value(sample["qc_coverage_pct"], "qc_coverage_pct") }}</td></tr>
         <tr><th>Mean Depth</th><td>{{ format_value(sample["qc_mean_depth"], "qc_mean_depth") }}</td></tr>

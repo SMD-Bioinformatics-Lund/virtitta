@@ -60,7 +60,7 @@ DEFAULT_COLUMN_LABELS = {
     "typing_report_subtype": "Subtype",
     "typing_main_blast_identity": "BLAST %",
     "resistance_summary": "Resistance",
-    "host_filter_reads_in": "Reads In",
+    "host_filter_reads_in": "Read pairs",
     "host_filter_reads_removed_proportion": "Human",
     "qc_coverage_pct": "Cov %",
     "qc_mean_depth": "Depth",

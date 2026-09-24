@@ -29,6 +29,7 @@ from virtitta.app import (
     create_app,
     display_version,
     format_value,
+    format_table_value,
     is_public_request_path,
     override_comment_text,
     request_path_without_root_path,
@@ -2798,6 +2799,11 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(format_value(92.4598, "qc_coverage_pct"), "92.46")
         self.assertEqual(format_value(4.42121, "qc_mean_depth"), "4")
 
+    def test_main_table_formats_reads_as_read_pairs(self) -> None:
+        self.assertEqual(format_table_value(123456, "host_filter_reads_in"), "61 728")
+        self.assertEqual(format_table_value(3, "host_filter_reads_in"), "1.5")
+        self.assertEqual(format_table_value(None, "host_filter_reads_in"), "")
+
     def test_human_column_style_uses_data_bar_width(self) -> None:
         self.assertEqual(cell_style("host_filter_reads_removed_proportion", 0.0123), "--data-bar-width:1.230%;")
         self.assertEqual(cell_style("qc_mean_depth", 4.0), "")
@@ -3110,6 +3116,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("/samples/SAMPLE001_fixture_run/files/main_blast/view", rendered)
         self.assertIn("/samples/SAMPLE001_fixture_run/files/main_blast", rendered)
         self.assertIn("SAMPLE001.fasta.blast", rendered)
+        self.assertIn("<th>Read pairs</th>", rendered)
         self.assertNotIn("/samples/SAMPLE001_fixture_run/files/main_cram/view", rendered)
         self.assertNotIn("/samples/SAMPLE001_fixture_run/files/display_rug_kde_plot/view", rendered)
 

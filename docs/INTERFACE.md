@@ -27,6 +27,7 @@ The main table is the primary review workspace.
 Key behavior:
 
 - `LID` is the main visible sample identifier when available.
+- `Read pairs` in the main table and sample details shows half of the raw read count entering host filtering.
 - Leading columns stay sticky during horizontal scrolling.
 - Table filters apply by run, subtype, QC state, categories, manual groups, and numeric thresholds. The displayed subtype is imported from the VirPipa BLAST top-hit genotype (`typing.main_blast_genotype`).
 - The text search field filters the currently loaded table client-side.
