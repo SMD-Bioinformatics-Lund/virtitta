@@ -4,7 +4,7 @@ This directory contains the Docker deployment for the legacy Lennart host.
 
 ## Initial setup
 
-The transfer directory on Lennart is `/data/bnf/dev/jonas/hcv/virtitta-docker`. The tracked `.env` contains Lennart's host paths and container UID/GID; review it before the first deployment:
+The transfer directory on Lennart is `/data/bnf/dev/jonas/hcv/virtitta-docker`. The tracked `.env` contains Lennart's host paths and container UID/GID settings; review it before the first deployment:
 
 ```sh
 $EDITOR .env
@@ -12,8 +12,10 @@ $EDITOR .env
 
 Set `VIRTITTA_DATA` to an absolute persistent-data path writable by `VIRTITTA_UID:VIRTITTA_GID`. Add `apache.conf` to the existing TLS virtual host and reload Apache. Install `virtitta.service` under `/etc/systemd/system/`, then run `systemctl daemon-reload` and enable it.
 
-The LIMS ingest directory `/media/MLU-CMD-NGS` is mounted read-write into the container. Ensure it is mounted on the
-host and writable by `VIRTITTA_UID:VIRTITTA_GID` before starting Virtitta.
+The LIMS ingest directory `/media/MLU-CMD-NGS` is mounted read-write into the container. `VIRTITTA_LIMS_GID` adds its
+owning host group as a supplementary group for the container process; set it to the directory's numeric group ID
+(`stat -c '%g' /media/MLU-CMD-NGS`). Recreate the container after changing this value so the group membership takes
+effect.
 
 ## Deploy a build
 
@@ -38,6 +40,7 @@ cd /data/bnf/dev/jonas/hcv/virtitta-docker
 sudo systemctl status virtitta
 sudo systemctl restart virtitta
 docker-compose logs --tail=200 virtitta
+docker-compose exec -T virtitta id
 ./import-run --run-dir /access/virpipa/hcv/RUN_NAME
 ```
 

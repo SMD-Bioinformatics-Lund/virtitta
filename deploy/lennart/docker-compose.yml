@@ -2,6 +2,8 @@ services:
   virtitta:
     image: ${VIRTITTA_IMAGE:-virtitta:lennart}
     user: "${VIRTITTA_UID:-1000}:${VIRTITTA_GID:-1000}"
+    group_add:
+      - "${VIRTITTA_LIMS_GID:-996}"
     security_opt:
       - seccomp=unconfined
     restart: unless-stopped
