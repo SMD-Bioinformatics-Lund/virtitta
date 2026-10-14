@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from virtitta import __version__
+from virtitta.resistance import drug_record, prediction_status
 from virtitta.artifact_cache import CACHE_OFFLINE_UNVERIFIED, resolve_cached_output
 from virtitta.auth import (
     PERMISSION_CATEGORY_UPDATE,
@@ -118,7 +119,11 @@ def display_version(value: str | None) -> str:
 templates.env.globals["app_version"] = display_version(os.environ.get("VIRTITTA_VERSION"))
 
 DETAIL_FILE_LINKS = [
-    ("Main FASTA", "main_fasta"),
+    ("Mapping scaffold FASTA", "main_fasta"),
+    ("Analytical majority FASTA", "analytical_majority_fasta"),
+    ("Scaffold provenance", "main_consensus_metadata"),
+    ("Majority provenance", "analytical_majority_consensus_metadata"),
+    ("IUPAC provenance", "iupac_consensus_metadata"),
     ("Main BLAST", "main_blast"),
     ("Main CRAM", "main_cram"),
     ("0.15 IUPAC FASTA", "iupac_fasta"),
@@ -126,12 +131,20 @@ DETAIL_FILE_LINKS = [
     ("Coverage TSV", "coverage_tsv"),
     ("Resistance TSV", "resistance_tsv"),
     ("Resistance GFF", "resistance_gff"),
+    ("Resistance evidence and gene alignments", "resistance_json"),
+    ("All resistance sites", "resistance_sites_gff3"),
     ("VADR BED", "vadr_bed"),
     ("Selected VADR GFF", "selected_vadr_gff"),
     ("Display Rug Plot", "display_rug_kde_plot"),
 ]
 
 VIEWABLE_DETAIL_OUTPUT_KEYS = {
+    "analytical_majority_fasta",
+    "main_consensus_metadata",
+    "analytical_majority_consensus_metadata",
+    "iupac_consensus_metadata",
+    "resistance_json",
+    "resistance_sites_gff3",
     "main_fasta",
     "main_blast",
     "iupac_fasta",
@@ -144,6 +157,7 @@ VIEWABLE_DETAIL_OUTPUT_KEYS = {
 DETAIL_VIEW_MEDIA_TYPE = "text/plain; charset=utf-8"
 
 IGV_TRACK_LINKS = [
+    ("All resistance sites", "resistance_sites_gff3"),
     ("Genome FASTA", "main_fasta"),
     ("Main CRAM", "main_cram"),
     ("VCF m0.05", "filtered_vcf_m005"),
@@ -158,6 +172,7 @@ IGV_TRACK_LINKS = [
 ]
 
 WEBIGV_ANNOTATION_TRACKS = [
+    ("All resistance sites", "resistance_sites_gff3", "gff3"),
     ("VADR BED", "vadr_bed", "bed"),
     ("Resistance GFF", "resistance_gff", "gff3"),
     ("Selected VADR GFF", "selected_vadr_gff", "gff3"),
@@ -171,6 +186,7 @@ WEBIGV_VCF_TRACKS = [
     ("VCF m0.4", "filtered_vcf_m04"),
 ]
 WEBIGV_ALLOWED_OUTPUT_KEYS = {
+    "resistance_sites_gff3",
     "main_fasta",
     "main_fasta_index",
     "main_cram",
@@ -490,16 +506,7 @@ def comment_link_label(row: dict) -> str:
 
 
 def resistance_prediction_status(prediction: str | None) -> str:
-    value = str(prediction or "").strip().lower()
-    if not value:
-        return "unknown"
-    if "resistant" in value:
-        return "resistant"
-    if "probable" in value or "intermediate" in value or "reduced" in value:
-        return "warning"
-    if "possible" in value:
-        return "possible"
-    return "warning"
+    return prediction_status(prediction)
 
 
 def resistance_status_label(status: str) -> str:
@@ -509,11 +516,17 @@ def resistance_status_label(status: str) -> str:
         "possible": "Possible resistance detected",
         "clear": "No resistance detected",
         "missing": "No resistance data",
+        "scored": "No resistance detected; substitutions at scored positions",
+        "unassessed": "Not assessed",
+        "unlicensed": "Not licensed",
     }.get(status, "Resistance status unknown")
 
 
 def resistance_sort_key(raw_sample: dict) -> tuple:
     severity_order = {
+        "scored": 0,
+        "unassessed": -1,
+        "unlicensed": -1,
         "missing": -1,
         "clear": 0,
         "possible": 1,
@@ -543,17 +556,24 @@ def build_resistance_cells(raw_sample: dict) -> list[dict]:
     cells = []
     for drug_name, short_label in HCV_RESISTANCE_DRUGS:
         record = lookup.get(drug_name)
+        warnings = []
+        low_depth = False
         if record:
-            status = resistance_prediction_status(record.get("prediction"))
-            mutations = [item for item in record.get("mutations", []) if item]
-            prediction = record.get("prediction") or resistance_status_label(status)
+            adapted = drug_record(record)
+            status = adapted["status"]
+            mutations = adapted["mutations"]
+            prediction = adapted["prediction"] or resistance_status_label(status)
+            warnings = adapted["warnings"]
+            low_depth = bool(adapted["low_depth_positions"])
         else:
-            status = "clear" if analysis_present else "missing"
+            status = "clear" if analysis_present and not resistance.get("schema_version") else "missing"
             mutations = []
             prediction = resistance_status_label(status)
         title = f"{drug_name}: {prediction}"
         if mutations:
             title = f"{title} ({', '.join(mutations)})"
+        if warnings:
+            title += "; " + "; ".join(warnings)
         cells.append(
             {
                 "drug": drug_name,
@@ -562,6 +582,8 @@ def build_resistance_cells(raw_sample: dict) -> list[dict]:
                 "prediction": prediction,
                 "mutations": mutations,
                 "title": title,
+                "warnings": warnings,
+                "low_depth": low_depth,
             }
         )
 
@@ -575,7 +597,7 @@ def resistance_tooltip_text(raw_sample: dict) -> str:
 
     lines: list[str] = []
     for cell in build_resistance_cells(raw_sample):
-        if cell["status"] not in {"resistant", "warning", "possible"}:
+        if cell["status"] not in {"resistant", "warning", "possible", "unassessed", "scored"}:
             continue
         if cell["mutations"]:
             lines.append(f"{cell['short']}: {', '.join(cell['mutations'])}")
@@ -591,14 +613,16 @@ def resistance_summary_text(raw_sample: dict) -> str:
     resistance = raw_sample.get("resistance", {}) if isinstance(raw_sample, dict) else {}
     if not resistance.get("analysis_present"):
         return "No resistance data"
-    if not resistance.get("has_resistance"):
-        return "No resistance detected"
     calls = []
     for cell in build_resistance_cells(raw_sample):
         if cell["status"] in {"resistant", "warning", "possible"}:
             calls.append(cell["short"])
     if calls:
         return " ".join(calls)
+    if any(cell["status"] in {"unassessed", "unknown", "missing"} for cell in build_resistance_cells(raw_sample)):
+        return "Resistance not fully assessed"
+    if not resistance.get("has_resistance"):
+        return "No resistance detected"
     count = resistance.get("mutation_count") or 0
     return f"{count} mutation{'s' if count != 1 else ''}"
 
@@ -1000,6 +1024,7 @@ def build_igv_url(config: Config, sample_row, outputs: dict | None = None) -> st
         raise HTTPException(status_code=404, detail="No genome FASTA available for IGV")
 
     file_keys = [
+        "resistance_sites_gff3",
         "main_cram",
         "filtered_vcf_m005",
         "filtered_vcf_m01",
@@ -2288,6 +2313,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "resistance_mutations": resistance_mutations,
                 "resistance_analysis_present": bool(resistance_summary.get("analysis_present")),
                 "resistance_has_calls": bool(resistance_summary.get("has_resistance")),
+                "resistance_summary_text": resistance_summary_text(raw),
+                "resistance_warnings": resistance_summary.get("warnings", []),
+                "resistance_integrity": resistance_summary.get("integrity_findings", []),
+                "resistance_limitations": resistance_summary.get("limitations", []),
                 "warning_message": " ".join(
                     item for item in (warning if isinstance(warning, str) else "", cache_warning) if item
                 ),

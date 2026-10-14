@@ -282,7 +282,7 @@
               <div class="resistance-summary-cell" title="{{ row['resistance_summary_tooltip'] }}">
                 <div class="resistance-strip resistance-strip-compact">
                   {% for cell in value %}
-                  <span class="resistance-box resistance-{{ cell['status'] }}"></span>
+                  <span class="resistance-box resistance-{{ cell['status'] }}{% if cell.low_depth %} resistance-low-depth{% endif %}" title="{{ cell.title }}"></span>
                   {% endfor %}
                 </div>
               </div>

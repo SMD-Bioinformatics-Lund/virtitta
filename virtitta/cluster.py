@@ -127,7 +127,7 @@ def _read_single_fasta_record(path: Path) -> tuple[str, str]:
         if line.startswith(">"):
             if header:
                 raise ClusterError(f"Expected one FASTA record in {path}")
-            header = line[1:].strip()
+            header = line[1:].split()[0]
         else:
             seq_parts.append(line.strip())
     if not header or not seq_parts:

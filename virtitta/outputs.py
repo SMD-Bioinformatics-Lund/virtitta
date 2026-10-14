@@ -13,7 +13,7 @@ VCF_OUTPUT_KEYS = {
 }
 
 OUTPUT_FALLBACKS = {
-    "export_fasta": ("main_fasta", "export_fasta", "lid_fasta"),
+    "export_fasta": ("analytical_majority_fasta", "main_fasta", "export_fasta", "lid_fasta"),
     "export_iupac_fasta": ("iupac_fasta", "export_iupac_fasta", "lid_iupac_fasta"),
 }
 

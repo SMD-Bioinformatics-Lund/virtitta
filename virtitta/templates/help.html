@@ -135,7 +135,7 @@
     <p>For each pair, a position is compared only when both samples have at least 1× read coverage and valid IUPAC bases. Compatible IUPAC bases match. Substitutions count individually, while a supported internal gap block counts as one indel event; terminal and unsupported gaps are ignored.</p>
     <ul class="help-list">
       <li><strong>Counts</strong> shows substitutions plus indel events. <strong>Details</strong> separates them and shows the pair-specific bases compared.</li>
-      <li><strong>15% IUPAC</strong> and <strong>Majority consensus</strong> select the consensus representation.</li>
+      <li><strong>15% IUPAC</strong> and <strong>Majority consensus</strong> select the analytical consensus representation. New archives mask uncovered positions in both; historical majority inputs may retain scaffold bases, excluded by coverage masking.</li>
       <li><strong>UPGMA</strong> reorders rows and columns to pull similar samples together for visual review. It does not change the values and is not a phylogenetic result.</li>
       <li>A grey <strong>-1</strong> means the pair had no eligible bases to compare.</li>
     </ul>

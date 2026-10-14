@@ -185,16 +185,20 @@
       {% for cell in resistance_cells %}
       <div class="resistance-drug">
         <div class="resistance-drug-label">{{ cell["short"] }}</div>
-        <div class="resistance-box resistance-{{ cell['status'] }}" title="{{ cell['title'] }}"></div>
+        <div class="resistance-box resistance-{{ cell['status'] }}{% if cell.low_depth %} resistance-low-depth{% endif %}" title="{{ cell['title'] }}"></div>
       </div>
       {% endfor %}
     </div>
     <div class="resistance-legend">
       <span><span class="resistance-box resistance-resistant legend-box"></span> Detected</span>
-      <span><span class="resistance-box resistance-warning legend-box"></span> Probable</span>
+      <span><span class="resistance-box resistance-warning legend-box"></span> Reduced / probable</span>
       <span><span class="resistance-box resistance-possible legend-box"></span> Possible</span>
       <span><span class="resistance-box resistance-clear legend-box"></span> None</span>
       <span><span class="resistance-box resistance-missing legend-box"></span> No data</span>
+      <span><span class="resistance-box resistance-scored legend-box"></span> Scored substitution, not resistant</span>
+      <span><span class="resistance-box resistance-unassessed legend-box"></span> Not assessed</span>
+      <span><span class="resistance-box resistance-unlicensed legend-box"></span> Not licensed</span>
+      <span><span class="resistance-box resistance-clear resistance-low-depth legend-box"></span> Low-depth support; review required</span>
     </div>
   </div>
   {% if resistance_has_calls %}
@@ -238,11 +242,26 @@
     </table>
   </div>
   {% else %}
-  <div class="muted">Resistance was analyzed and no resistance-associated mutations were detected.</div>
+  <div class="muted">{{ resistance_summary_text }}</div>
   {% endif %}
   {% else %}
   <div class="muted">No resistance data available.</div>
   {% endif %}
+  {% for warning in resistance_warnings %}
+  <div class="muted">{{ warning }}</div>
+  {% endfor %}
+  {% if sample_json.get('resistance', {}).get('schema_version') %}
+  <div class="muted">Resistance schema {{ sample_json.resistance.schema_version }}; baseline {{ sample_json.resistance.get('baseline_source', 'not recorded') }}.</div>
+  {% endif %}
+  {% for finding in resistance_integrity %}
+  <div><strong>{{ finding.gene }} coding integrity:</strong> {{ finding.message }}</div>
+  {% endfor %}
+  {% for cell in resistance_cells if cell.warnings %}
+  <div>{{ cell.drug }}: {{ cell.warnings|join('; ') }}</div>
+  {% endfor %}
+  {% for limitation in resistance_limitations %}
+  <div class="muted">{{ limitation }}</div>
+  {% endfor %}
 </section>
 
 <section class="grid two-col">

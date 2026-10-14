@@ -122,7 +122,7 @@ The export menu supports:
 Repeated exports create unique filenames instead of overwriting existing files. If automatic delivery fails after
 the local copy is written, Virtitta keeps the local copy and reports the failed LIMS delivery.
 
-The FASTA clipboard exports use canonical `main_fasta` and `iupac_fasta` outputs, falling back to legacy `export_*`
+The majority FASTA clipboard export prefers `analytical_majority_fasta`; historical samples fall back to `main_fasta`. IUPAC exports use `iupac_fasta`, falling back to legacy `export_*`
 outputs for older imports. The export menu lets the operator choose LID or sample ID headers; LID is the default.
 When configured and populated, Virtitta serves these from the local output cache after a cheap source freshness check.
 Changed sources refresh the cache automatically. If result storage is temporarily unavailable, existing cached copies
@@ -206,6 +206,8 @@ Roles:
 Routes are still protected server-side even when controls are hidden.
 ## Pairwise distance matrices
 
+New VirPipa archives separate the reference-filled mapping scaffold from masked analytical majority and IUPAC FASTAs. IGV continues using `main_fasta`; exports and the majority matrix prefer `analytical_majority_fasta`. Provenance is archived in accompanying JSON, never required in FASTA headers. Resistance outcomes based on 1–6 usable observations retain their outcome and show a separate low-depth review warning in tooltips and sample details.
+
 When clustering is enabled, select at least two samples and use **Distance...** to create pairwise matrices. This is separate from clustering: it runs MAFFT once to establish a shared gap pattern and does not run IQ-TREE or GrapeTree. Both the 15% IUPAC and majority-consensus FASTAs are required.
 
 The result page starts with the **15% IUPAC** matrix. Switch between that and **Majority consensus**, and between compact event counts and detailed cells showing substitutions, indel events, and the pair-specific number of compared bases. "Bases compared" is the pair-specific intersection of positions with read coverage ≥1× and valid IUPAC bases in both samples. Internal indel blocks are counted only when the opposite bases and both flanks are coverage-supported and valid; terminal gaps are ignored. Both matrices share one heatmap scale; zero and diagonal cells remain neutral. These values are coverage-supported event-like minimum difference counts, not phylogenetic or transmission distances.
@@ -217,3 +219,17 @@ UPGMA gives those pairs a temporary penalty one above the largest available even
 look like identity.
 
 FASTA case is ignored and unknown bases are excluded from comparisons. Overlapping IUPAC alleles match, internal same-direction gap blocks count as one indel event when coverage and flank requirements are met, and terminal gaps are ignored. Duplicate visible identifiers are blocked unless the explicit allow-duplicates action is used, which adds run-name suffixes.
+
+## Resistance output compatibility
+
+VirPipa schema 3 resistance outcomes are displayed directly, including not assessed,
+not licensed, and non-resistant substitutions at scored positions. Schema 3.1 low-depth
+qualifications are marked by `!` while preserving outcome colors; details are available
+in tooltips and sample warnings. Historical
+prediction/mutation records remain supported. Compound-rule coverage warnings are
+separate from gene coding-integrity findings; neither is itself a resistance call.
+Sample details expose the resistance JSON, including reviewable gene alignments,
+and all-site annotations in the combined main-reference desktop/webIGV session.
+Re-import after a pipeline recall or rerun preserves Virtitta-owned review state.
+Schema/baseline provenance and unphased-mixture limitations are shown separately
+from antiviral outcomes and coding-integrity findings.

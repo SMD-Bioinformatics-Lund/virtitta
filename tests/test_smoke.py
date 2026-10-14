@@ -2755,6 +2755,41 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertEqual(sample["sample_category"], "EQA")
         self.assertEqual(sample["manual_groups"], "outbreak-22")
 
+    def test_corrected_resistance_reimport_preserves_review_and_loads_all_site_track(self) -> None:
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            set_sample_category(conn, ["SAMPLE001_fixture_run"], "EQA")
+            update_qc_status(conn, ["SAMPLE001_fixture_run"], "pass")
+            add_comment(conn, "SAMPLE001_fixture_run", "Keep this review", "reviewer")
+        finally:
+            conn.close()
+        qc_path = self.sample_dir / "SAMPLE001_qc_summary.json"
+        raw = json.loads(qc_path.read_text())
+        raw["resistance"] = {"schema_version": "3.0", "analysis_present": True,
+                             "has_resistance": False, "by_drug": [{"drug": "Daclatasvir",
+                             "outcome": "not assessed", "prediction": None,
+                             "warnings": ["Incomplete compound rule"]}]}
+        raw["outputs"]["resistance_sites_gff3"] = "SAMPLE001_resistance_sites.gff3"
+        (self.sample_dir / "SAMPLE001_resistance_sites.gff3").write_text("##gff-version 3\n")
+        qc_path.write_text(json.dumps(raw))
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            sample = dict(get_sample(conn, "SAMPLE001_fixture_run"))
+            comments = get_comments(conn, "SAMPLE001_fixture_run")
+        finally:
+            conn.close()
+        self.assertEqual(sample["sample_category"], "EQA")
+        self.assertEqual(sample["qc_status"], "pass")
+        self.assertEqual(len(comments), 1)
+        imported = json.loads(sample["raw_json"])
+        cell = next(c for c in build_resistance_cells(imported) if c["short"] == "DCV")
+        self.assertEqual(cell["status"], "unassessed")
+        self.assertIn("Incomplete compound rule", cell["title"])
+        self.assertIn("SAMPLE001_resistance_sites.gff3", build_igv_url(config, sample, imported["outputs"]))
+
     def test_distinct_category_and_group_lists_include_manual_annotations(self) -> None:
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
