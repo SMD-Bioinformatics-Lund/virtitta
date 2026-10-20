@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import re
 import sqlite3
@@ -39,7 +40,8 @@ from virtitta.app import (
 from virtitta.artifact_cache import CACHE_OK, CACHE_STALE, verify_sample_cache
 from virtitta.auth import authenticate_local_user, create_login_session, disabled_auth_user, get_user_from_cookie, hash_password
 from virtitta.cli import build_parser
-from virtitta.cluster import ClusterError, cluster_artifacts, prepare_cluster_files, run_cluster_job
+from virtitta.cluster import ClusterError, cluster_artifacts, prepare_cluster_files, run_cluster_job, write_grapetree_json
+from virtitta.resistance import HCV_RESISTANCE_DRUGS
 from virtitta.config import load_config
 from virtitta.distance import (
     ANALYSIS_TYPE as DISTANCE_ANALYSIS_TYPE,
@@ -493,6 +495,21 @@ class VirtittaSmokeTests(unittest.TestCase):
                 92,
             ),
         )
+
+    def test_import_run_retains_pipeline_version_without_schema_change(self) -> None:
+        # Version is additive upstream provenance, retained in the imported raw JSON.
+        summary_path = self.sample_dir / "SAMPLE001_qc_summary.json"
+        summary = json.loads(summary_path.read_text())
+        summary["pipeline_version"] = "0.3.0"
+        summary_path.write_text(json.dumps(summary))
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        conn = connect(config.database.path)
+        try:
+            imported = get_sample(conn, "SAMPLE001_fixture_run")
+            self.assertEqual(json.loads(imported["raw_json"])["pipeline_version"], "0.3.0")
+        finally:
+            conn.close()
 
     def test_import_run_accepts_flat_sample_layout(self) -> None:
         run_dir = self.root / "flat_run"
@@ -2148,6 +2165,16 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.enable_cluster()
         self.add_second_sample_summary(subtype="1a")
         self.add_sample_summary(sample_id="SAMPLE003", subtype="1a", lid="LID003", tree_id="LID003-0.15-iupac")
+        for sample_id, outcome in (("SAMPLE001", "not assessed"),
+                                   ("SAMPLE002", "susceptible with scored substitutions"),
+                                   ("SAMPLE003", "resistant")):
+            summary_path = self.run_dir / sample_id / "results" / f"{sample_id}_qc_summary.json"
+            summary = json.loads(summary_path.read_text())
+            summary["resistance"] = {"schema_version": "3.1", "analysis_present": True,
+                "has_resistance": outcome == "resistant", "by_drug": [
+                    {"drug": drug, "outcome": outcome if drug == "Daclatasvir" else "susceptible"}
+                    for drug, _ in HCV_RESISTANCE_DRUGS]}
+            summary_path.write_text(json.dumps(summary))
         config = load_config(self.config_path)
         import_run(config, self.run_dir)
         conn = connect(config.database.path)
@@ -2176,6 +2203,16 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("typing_report_subtype\ttyping_main_blast_identity\tresistance_summary", metadata)
         self.assertIn("comment_count", metadata)
         self.assertIn("LID002\tLID002\tSAMPLE002\t2026-04-08\t2026-04-08\t\t\tunreviewed\t\t1a", metadata)
+        expected = {"LID001": "Resistance not fully assessed",
+                    "LID002": "No resistance detected", "LID003": "DCV"}
+        self.assertEqual({row["ID"]: row["resistance_summary"]
+                          for row in csv.DictReader(metadata.splitlines(), delimiter="\t")}, expected)
+        artifacts = cluster_artifacts("job1")
+        (config.cluster.output_root / artifacts["treefile"]).write_text("(LID001,LID002,LID003);")
+        write_grapetree_json(config, "job1")
+        payload = json.loads((config.cluster.output_root / artifacts["grapetree_json"]).read_text())
+        self.assertEqual({key: row["resistance_summary"] for key, row in payload["metadata"].items()},
+                         expected)
 
     def test_prepare_cluster_files_uses_live_fasta_instead_of_stale_output_cache(self) -> None:
         self.enable_cluster()

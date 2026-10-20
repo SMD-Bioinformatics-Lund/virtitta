@@ -233,3 +233,8 @@ and all-site annotations in the combined main-reference desktop/webIGV session.
 Re-import after a pipeline recall or rerun preserves Virtitta-owned review state.
 Schema/baseline provenance and unphased-mixture limitations are shown separately
 from antiviral outcomes and coding-integrity findings.
+Sample summaries and tree/GrapeTree resistance metadata use the same presentation
+adapter. Incomplete, missing versioned outcomes or unknown outcomes are reported as
+`Resistance not fully assessed` when no positive call is present, never as a clear
+negative. Positive calls retain their drug abbreviations; non-resistant scored
+substitutions alone are not reported as resistance. No analysis is `No resistance data`.

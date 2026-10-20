@@ -11,11 +11,21 @@ the same change. Keep entries short enough to revisit and prune.
 
 ## Open Plans
 
+- Defer BLAST subtyping changes until resistance validation. The implementation plan
+  is in the sibling VirPipa repository at `docs/plans/blast_subtyping.md`: summarize
+  per-reference segments, group subtype alternatives and render pipeline-provided
+  evidence in sample details. Do not infer new typing or resistance calls in Virtitta.
+
 - Consider showing names or other profile information on the user account page; currently it shows username, role,
   and password change only.
 - Benchmark realistic sample counts before adding a distance-matrix size warning or hard limit.
 
 ## Resistance review (compatibility implemented; interactive review pending)
+
+- Implemented shared sample/tree/GrapeTree resistance summaries: incomplete assessment
+  is not a clear negative, and scored substitutions alone are not resistance.
+- Next: run the representative-data checklist in VirPipa's `docs/resistance_validation.md`
+  before collection-wide reprocessing. BLAST ranking and display remain deferred.
 
 - Implemented the three-FASTA contract: analytical majority exports/matrix inputs, separate mapping-scaffold IGV reference, JSON provenance downloads, and low-depth resistance warning presentation.
 - Future: curator resistance overrides must preserve the automated outcome and record reviewer, reason and date.

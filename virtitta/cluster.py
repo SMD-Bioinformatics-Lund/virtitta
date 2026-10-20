@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from virtitta.config import Config
+from virtitta.resistance import resistance_summary_text
 from virtitta.outputs import effective_output_relname, safe_relative_path
 from virtitta.repository import (
     connect,
@@ -266,25 +267,7 @@ def sample_tree_id(sample_row: dict) -> str:
 
 
 def _resistance_metadata_value(raw_sample: dict) -> str:
-    resistance = raw_sample.get("resistance", {}) if isinstance(raw_sample, dict) else {}
-    if not resistance.get("analysis_present"):
-        return "No resistance data"
-    if not resistance.get("has_resistance"):
-        return "No resistance detected"
-    calls = []
-    for record in resistance.get("by_drug", []):
-        if not isinstance(record, dict):
-            continue
-        prediction = str(record.get("prediction") or "").lower()
-        mutations = [str(item) for item in record.get("mutations", []) if item]
-        if prediction and prediction not in {"susceptible", "none", "no resistance"}:
-            calls.append(record.get("drug") or prediction)
-        elif mutations:
-            calls.extend(mutations)
-    if calls:
-        return ", ".join(str(item) for item in calls)
-    count = resistance.get("mutation_count") or 0
-    return f"{count} mutation{'s' if count != 1 else ''}"
+    return resistance_summary_text(raw_sample)
 
 
 def _metadata_value(connection, sample_row: dict, column: str) -> str:
