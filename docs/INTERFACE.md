@@ -1,5 +1,19 @@
 # Virtitta Interface Guide
 
+## IUPAC resistance review in IGV
+
+New VirPipa archives declare an analytical IUPAC review bundle. Desktop IGV and
+webIGV use the existing 15% IUPAC FASTA/CRAM, with matching resistance and gene
+annotation display copies. Mutation links navigate to the IUPAC contig.
+Scaffold-derived variant tracks remain available at all existing thresholds;
+their REF alleles retain the original calling reference and can differ from the
+displayed IUPAC base. They were not recalled against IUPAC.
+
+Original files remain downloadable. Historical archives without a review bundle
+retain an explicitly labelled legacy scaffold view. An incomplete declared bundle
+reports an error rather than mixing scaffold and IUPAC tracks. Re-import a completed
+new archive to activate this view; no database migration is required.
+
 This guide describes the browser interface. Available controls depend on authentication and role settings.
 The upper-left subtitle includes the running Virtitta image version, for example `v0.9.0-1-gccd14b3`.
 

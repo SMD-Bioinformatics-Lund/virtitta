@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from virtitta import __version__
+from virtitta.igv_review import REVIEW_KEYS, review_locus, select_review
 from virtitta.resistance import (
     HCV_RESISTANCE_DRUGS,
     build_resistance_cells,
@@ -125,6 +126,7 @@ def display_version(value: str | None) -> str:
 templates.env.globals["app_version"] = display_version(os.environ.get("VIRTITTA_VERSION"))
 
 DETAIL_FILE_LINKS = [
+    ("IGV review provenance", "igv_review_manifest"),
     ("Mapping scaffold FASTA", "main_fasta"),
     ("Analytical majority FASTA", "analytical_majority_fasta"),
     ("Scaffold provenance", "main_consensus_metadata"),
@@ -145,6 +147,7 @@ DETAIL_FILE_LINKS = [
 ]
 
 VIEWABLE_DETAIL_OUTPUT_KEYS = {
+    "igv_review_manifest",
     "analytical_majority_fasta",
     "main_consensus_metadata",
     "analytical_majority_consensus_metadata",
@@ -201,6 +204,7 @@ WEBIGV_ALLOWED_OUTPUT_KEYS = {
     "resistance_gff",
     "selected_vadr_gff",
 }
+WEBIGV_ALLOWED_OUTPUT_KEYS.update(REVIEW_KEYS.values())
 for _label, _key in WEBIGV_VCF_TRACKS:
     WEBIGV_ALLOWED_OUTPUT_KEYS.add(_key)
     WEBIGV_ALLOWED_OUTPUT_KEYS.add(f"{_key}_index")
@@ -547,7 +551,7 @@ def build_resistance_mutations(raw_sample: dict, sample_id: str) -> list[dict]:
         end = mutation.get("genomic_end")
         locus = None
         if start and end:
-            locus = f"{sample_id}:{start}-{end}"
+            locus = review_locus(f"{sample_id}:{start}-{end}", raw_sample.get("igv_review"))
         item = dict(mutation)
         item["index"] = index
         item["drugs_text"] = ", ".join(item.get("drugs", []) or [])
@@ -910,11 +914,24 @@ def root_path_local_url(url: str, root_path: str) -> str:
     return urlunsplit(("", "", path, parts.query, parts.fragment))
 
 
+def igv_review_view(config, sample_row, outputs):
+    try:
+        view = select_review(outputs, raw_json_for_sample(sample_row).get("igv_review"))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if view["keys"]:
+        for key in [*view["keys"].values(), "igv_review_manifest"]:
+            if not webigv_output_exists(config, sample_row, outputs, key):
+                raise HTTPException(status_code=409, detail=f"Incomplete IUPAC IGV review bundle: missing {key}")
+    return view
+
+
 def build_igv_url(config: Config, sample_row, outputs: dict | None = None) -> str:
     if not config.features.igv or not config.igv.enabled:
         raise HTTPException(status_code=404, detail="IGV integration is disabled")
 
     resolved_outputs = outputs if outputs is not None else effective_outputs(config, sample_row)
+    view = igv_review_view(config, sample_row, resolved_outputs)
     root = config.get_root(sample_row["source_root_name"])
     if root is None:
         raise HTTPException(status_code=500, detail="Missing results root mapping")
@@ -929,7 +946,7 @@ def build_igv_url(config: Config, sample_row, outputs: dict | None = None) -> st
         windows_path = sample_windows_root.joinpath(PureWindowsPath(sample_rel.as_posix())).joinpath(relname)
         return windows_path_to_igv_path(str(windows_path))
 
-    genome = convert_output("main_fasta")
+    genome = convert_output(view["keys"].get("main_fasta", "main_fasta"))
     if not genome:
         raise HTTPException(status_code=404, detail="No genome FASTA available for IGV")
 
@@ -947,13 +964,19 @@ def build_igv_url(config: Config, sample_row, outputs: dict | None = None) -> st
         "selected_vadr_gff",
     ]
     files: list[str] = []
+    names: list[str] = []
+    labels = {key: label for label, key in IGV_TRACK_LINKS}
     for key in file_keys:
-        converted = convert_output(key)
+        converted = convert_output(view["keys"].get(key, key))
         if converted:
             files.append(converted)
+            names.append("Scaffold-derived variants · "+labels[key] if key.startswith("filtered_vcf") else
+                         "IUPAC resistance-evidence CRAM" if key == "main_cram" else labels[key])
     query_items: list[tuple[str, str]] = [("genome", genome)]
     if files:
         query_items.append(("file", ",".join(files)))
+        if view["keys"]:
+            query_items.append(("name", ",".join(names)))
     query_items.append(("merge", "false"))
     return f"{config.igv.base_url}?{urlencode(query_items)}"
 
@@ -977,6 +1000,8 @@ def webigv_enabled(config: Config) -> bool:
 
 
 def webigv_available(outputs: dict) -> bool:
+    if outputs.get("igv_review_manifest"):
+        return True  # Declared but incomplete bundles must report an error, not fall back.
     return bool(effective_output_relname("main_fasta", outputs) and effective_output_relname("main_fasta_index", outputs))
 
 
@@ -1011,27 +1036,34 @@ def build_webigv_browser_config(
     if not webigv_available(resolved_outputs):
         raise HTTPException(status_code=404, detail="No indexed genome FASTA available for webIGV")
 
+    view = igv_review_view(config, sample_row, resolved_outputs)
+    keys = view["keys"]
+    fasta_key = keys.get("main_fasta", "main_fasta")
+    fasta_index_key = keys.get("main_fasta_index", "main_fasta_index")
+    cram_key = keys.get("main_cram", "main_cram")
+    cram_index_key = keys.get("main_cram_index", "main_cram_index")
+
     sample_run_id = sample_row["sample_run_id"]
     browser_config = {
         "reference": {
             "id": sample_run_id,
             "name": display_identifier(sample_row) or sample_row["sample_id"],
-            "fastaURL": webigv_named_track_url(request, sample_run_id, "main_fasta", resolved_outputs),
-            "indexURL": webigv_named_track_url(request, sample_run_id, "main_fasta_index", resolved_outputs),
+            "fastaURL": webigv_named_track_url(request, sample_run_id, fasta_key, resolved_outputs),
+            "indexURL": webigv_named_track_url(request, sample_run_id, fasta_index_key, resolved_outputs),
         },
         "tracks": [],
     }
     if locus:
-        browser_config["locus"] = locus
+        browser_config["locus"] = review_locus(locus, raw_json_for_sample(sample_row).get("igv_review"))
 
-    if effective_output_relname("main_cram", resolved_outputs) and webigv_output_exists(config, sample_row, resolved_outputs, "main_cram_index"):
+    if effective_output_relname(cram_key, resolved_outputs) and webigv_output_exists(config, sample_row, resolved_outputs, cram_index_key):
         browser_config["tracks"].append(
             {
-                "name": "Main CRAM",
+                "name": "IUPAC resistance-evidence CRAM" if keys else "Main CRAM",
                 "type": "alignment",
                 "format": "cram",
-                "url": webigv_named_track_url(request, sample_run_id, "main_cram", resolved_outputs),
-                "indexURL": webigv_named_track_url(request, sample_run_id, "main_cram_index", resolved_outputs),
+                "url": webigv_named_track_url(request, sample_run_id, cram_key, resolved_outputs),
+                "indexURL": webigv_named_track_url(request, sample_run_id, cram_index_key, resolved_outputs),
                 "checkSequenceMD5": False,
                 "showSoftClips": True,
                 "displayMode": "SQUISHED",
@@ -1039,6 +1071,9 @@ def build_webigv_browser_config(
         )
 
     for label, output_key in WEBIGV_VCF_TRACKS:
+        if keys:
+            label = "Scaffold-derived variants · "+label
+        output_key = keys.get(output_key, output_key)
         index_key = f"{output_key}_index"
         if effective_output_relname(output_key, resolved_outputs) and webigv_output_exists(config, sample_row, resolved_outputs, index_key):
             browser_config["tracks"].append(
@@ -1052,6 +1087,7 @@ def build_webigv_browser_config(
             )
 
     for label, output_key, file_format in WEBIGV_ANNOTATION_TRACKS:
+        output_key = keys.get(output_key, output_key)
         if effective_output_relname(output_key, resolved_outputs):
             browser_config["tracks"].append(
                 {
@@ -2191,6 +2227,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 + "."
             )
         igv_url = None
+        review_notice = ""
+        review_keys = {}
+        try:
+            view = igv_review_view(config, sample_row, outputs)
+            review_notice, review_keys = view["notice"], view["keys"]
+        except HTTPException as exc:
+            review_notice = str(exc.detail)
         if config.features.igv and config.igv.enabled:
             try:
                 igv_url = build_igv_url(config, sample_row, outputs)
@@ -2228,7 +2271,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "resistance_integrity": resistance_summary.get("integrity_findings", []),
                 "resistance_limitations": resistance_summary.get("limitations", []),
                 "warning_message": " ".join(
-                    item for item in (warning if isinstance(warning, str) else "", cache_warning) if item
+                    item for item in (warning if isinstance(warning, str) else "", cache_warning, review_notice) if item
                 ),
                 "notice_message": notice if isinstance(notice, str) else "",
                 "can_delete_comment": lambda comment: can_delete_comment(request, comment),
@@ -2246,7 +2289,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "sample_categories": config.annotations.sample_categories,
                 "refresh_run_name": sample_row["run_name"],
                 "detail_links": output_links(outputs, DETAIL_FILE_LINKS),
-                "igv_track_links": output_links(outputs, IGV_TRACK_LINKS),
+                "igv_track_links": output_links(outputs, [
+                    (("Scaffold-derived variants · "+label if key.startswith("filtered_vcf") and review_keys else
+                      "IUPAC genome FASTA" if key == "main_fasta" and review_keys else
+                      "IUPAC resistance-evidence CRAM" if key == "main_cram" and review_keys else label),
+                     review_keys.get(key, key))
+                    for label, key in IGV_TRACK_LINKS]),
             },
         )
 
@@ -2447,7 +2495,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "sample": sample_row,
                 "display_identifier": display_identifier,
                 "webigv_config_json": json.dumps(browser_config),
-                "warning_message": "",
+                "warning_message": igv_review_view(config, sample_row, outputs)["notice"],
                 "notice_message": "",
             },
         )
@@ -2588,6 +2636,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             connection.close()
 
         raw = raw_json_for_sample(sample_row)
+        if raw.get("igv_review") or raw.get("outputs", {}).get("igv_review_manifest"):
+            igv_review_view(config, sample_row, effective_outputs(config, sample_row, raw))
         mutations = build_resistance_mutations(raw, sample_row["sample_id"])
         if mutation_index < 0 or mutation_index >= len(mutations):
             raise HTTPException(status_code=404, detail="Resistance mutation not found")

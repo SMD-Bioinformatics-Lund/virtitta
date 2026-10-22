@@ -26,6 +26,11 @@ the same change. Keep entries short enough to revisit and prune.
   is not a clear negative, and scored substitutions alone are not resistance.
 - Next: run the representative-data checklist in VirPipa's `docs/resistance_validation.md`
   before collection-wide reprocessing. BLAST ranking and display remain deferred.
+- Future typing: add validated subtype-1a clade I/II classification, explicit unassigned
+  results and method/reference provenance; show clade below subtype, not as resistance.
+- Implemented IUPAC-targeted desktop/webIGV review bundle selection, scaffold-derived
+  variant labels and matching resistance navigation; verify actual rendering on Hopper
+  archives before further collection-wide processing.
 
 - Implemented the three-FASTA contract: analytical majority exports/matrix inputs, separate mapping-scaffold IGV reference, JSON provenance downloads, and low-depth resistance warning presentation.
 - Future: curator resistance overrides must preserve the automated outcome and record reviewer, reason and date.

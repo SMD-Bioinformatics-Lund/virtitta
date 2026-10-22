@@ -375,6 +375,9 @@ def _validate_required_sidecars(sample: dict, sample_dir: Path) -> None:
     outputs = sample.get("outputs", {})
     if not isinstance(outputs, dict):
         return
+    if sample.get("igv_review") is not None or outputs.get("igv_review_manifest"):
+        from virtitta.igv_review import select_review
+        select_review(outputs, sample.get("igv_review"))
     missing: list[str] = []
     for output_key, relname in required_sidecars(outputs):
         try:

@@ -99,6 +99,13 @@ the old `source_root_name` to the new one.
 
 ## IGV Configuration
 
+New archives declare `igv_review` metadata and `igv_iupac_*` output paths in the
+QC JSON. Import validates the declared bundle, including FASTA/CRAM/VCF indexes;
+desktop and webIGV select it together. Legacy archives retain the scaffold view.
+An incomplete new bundle produces an explicit error, not a reference fallback.
+The original export/cache roles remain unchanged; review-copy output keys can be
+added explicitly to `cache.output_keys` if desired. No database migration is needed.
+
 Desktop IGV remains the preferred workflow for routine review:
 
 ```toml

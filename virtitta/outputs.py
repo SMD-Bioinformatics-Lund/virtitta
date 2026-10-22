@@ -46,6 +46,13 @@ def inferred_index_relname(outputs: dict, output_key: str) -> str | None:
 
 def required_sidecars(outputs: dict) -> list[tuple[str, str]]:
     sidecars: list[tuple[str, str]] = []
+    if outputs.get("igv_review_manifest") or any(key.startswith("igv_iupac_") for key in outputs):
+        from virtitta.igv_review import REVIEW_KEYS
+        # All files in the declared bundle are required, not merely its indexes.
+        for key in [*REVIEW_KEYS.values(), "igv_review_manifest"]:
+            if not outputs.get(key):
+                raise ValueError(f"Incomplete IUPAC IGV review bundle: {key}")
+            sidecars.append((key, outputs[key]))
     if outputs.get("main_fasta"):
         sidecars.append(("main_fasta_index", outputs.get("main_fasta_index") or f"{outputs['main_fasta']}.fai"))
     if outputs.get("main_cram"):
