@@ -157,3 +157,67 @@ class IgvReviewTests(unittest.TestCase):
         asyncio.run(asyncio.wait_for(response(request.scope, receive, send), timeout=10))
         self.assertEqual(messages[0]["status"], 206)
         self.assertEqual(b"".join(m.get("body", b"") for m in messages), b"disp")
+
+    def test_valid_views_show_context_inline_not_as_notifications(self):
+        config, sample, raw = self.bundle()
+        app = create_app(self.config_path)
+        detail = next(r for r in app.routes if r.name == "sample_detail")
+        web = next(r for r in app.routes if r.name == "sample_webigv")
+        for resistant in (False, True):
+            with self.subTest(resistant=resistant):
+                raw["resistance"]["has_resistance"] = resistant
+                raw["resistance"]["by_drug"] = [
+                    {"drug": drug, "outcome": "resistant" if resistant and drug == "Dasabuvir" else "susceptible"}
+                    for drug, _ in smoke.HCV_RESISTANCE_DRUGS
+                ]
+                self.write_sample_summary(raw)
+                import_run(config, self.run_dir)
+                responses = [
+                    detail.endpoint(self.make_request(app), sample["sample_run_id"], warning="", notice=""),
+                    web.endpoint(self.make_request(app), sample["sample_run_id"], locus=""),
+                ]
+                for response in responses:
+                    self.assertEqual(response.context["warning_message"], "")
+                    self.assertEqual(response.context["notice_message"], "")
+                    note = response.context["igv_view_notice"]
+                    self.assertIn("Scaffold-derived VCF REF alleles", note)
+                    self.assertIn(f'<p class="muted">{note}</p>', response.body.decode())
+
+    def test_legacy_view_context_is_inline_too(self):
+        self.enable_webigv()
+        config = load_config(self.config_path)
+        import_run(config, self.run_dir)
+        app = create_app(self.config_path)
+        detail = next(r for r in app.routes if r.name == "sample_detail")
+        web = next(r for r in app.routes if r.name == "sample_webigv")
+        for response in (
+            detail.endpoint(self.make_request(app), "SAMPLE001_fixture_run", warning="", notice=""),
+            web.endpoint(self.make_request(app), "SAMPLE001_fixture_run", locus=""),
+        ):
+            self.assertEqual(response.context["warning_message"], "")
+            self.assertIn("Legacy scaffold view", response.context["igv_view_notice"])
+            self.assertIn(f'<p class="muted">{response.context["igv_view_notice"]}</p>', response.body.decode())
+
+    def test_missing_bundle_still_warns_and_blocks_webigv(self):
+        config, sample, raw = self.bundle()
+        (self.sample_dir / raw["outputs"]["igv_iupac_resistance_sites_gff3"]).unlink()
+        app = create_app(self.config_path)
+        detail = next(r for r in app.routes if r.name == "sample_detail")
+        response = detail.endpoint(self.make_request(app), sample["sample_run_id"], warning="", notice="")
+        self.assertIn("Incomplete IUPAC IGV review bundle", response.context["warning_message"])
+        self.assertEqual(response.context["igv_view_notice"], "")
+        web = next(r for r in app.routes if r.name == "sample_webigv")
+        with self.assertRaises(HTTPException) as error:
+            web.endpoint(self.make_request(app), sample["sample_run_id"], locus="")
+        self.assertEqual(error.exception.status_code, 409)
+
+    def test_cache_warning_is_preserved_alongside_inline_context(self):
+        _, sample, _ = self.bundle()
+        (self.sample_dir / "SAMPLE001.fasta").unlink()
+        app = create_app(self.config_path)
+        detail = next(r for r in app.routes if r.name == "sample_detail")
+        response = detail.endpoint(self.make_request(app), sample["sample_run_id"], warning="", notice="")
+        warning = response.context["warning_message"]
+        self.assertIn("using unverified cached copies", warning)
+        self.assertNotIn("Scaffold-derived VCF REF alleles", warning)
+        self.assertIn("Scaffold-derived VCF REF alleles", response.context["igv_view_notice"])

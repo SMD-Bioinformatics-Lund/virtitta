@@ -12,6 +12,9 @@
 </section>
 
 <section class="panel webigv-panel">
+  {% if igv_view_notice %}
+  <p class="muted">{{ igv_view_notice }}</p>
+  {% endif %}
   <div id="webigv-browser" class="webigv-browser"></div>
 </section>
 

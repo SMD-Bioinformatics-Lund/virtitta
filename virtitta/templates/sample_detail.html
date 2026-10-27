@@ -292,6 +292,9 @@
   <div class="panel">
     <h3>IGV Track Files</h3>
     {% if permissions.export_read %}
+    {% if igv_view_notice %}
+    <p class="muted">{{ igv_view_notice }}</p>
+    {% endif %}
     <div class="link-grid">
       {% for link in igv_track_links %}
       <a class="file-link" href="{{ request.url_for('sample_file', sample_run_id=sample['sample_run_id'], output_key=link['key']) }}">

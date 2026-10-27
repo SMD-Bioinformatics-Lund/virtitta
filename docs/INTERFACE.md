@@ -13,6 +13,11 @@ Scaffold-derived variant tracks remain available at all existing thresholds;
 their REF alleles retain the original calling reference and can differ from the
 displayed IUPAC base. They were not recalled against IUPAC.
 
+The IUPAC/scaffold view explanation appears as muted help in the sample's
+**IGV Track Files** section and above the webIGV browser, not as a repeated
+notification. Missing or incompatible bundles and offline-cache warnings remain
+genuine warnings; the explanation is independent of resistance status.
+
 Original files remain downloadable. Historical archives without a review bundle
 retain an explicitly labelled legacy scaffold view. An incomplete declared bundle
 reports an error rather than mixing scaffold and IUPAC tracks. Re-import a completed

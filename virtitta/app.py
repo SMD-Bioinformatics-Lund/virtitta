@@ -2228,12 +2228,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             )
         igv_url = None
         review_notice = ""
+        review_warning = ""
         review_keys = {}
         try:
             view = igv_review_view(config, sample_row, outputs)
             review_notice, review_keys = view["notice"], view["keys"]
         except HTTPException as exc:
-            review_notice = str(exc.detail)
+            review_warning = str(exc.detail)
         if config.features.igv and config.igv.enabled:
             try:
                 igv_url = build_igv_url(config, sample_row, outputs)
@@ -2270,8 +2271,9 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "resistance_warnings": resistance_summary.get("warnings", []),
                 "resistance_integrity": resistance_summary.get("integrity_findings", []),
                 "resistance_limitations": resistance_summary.get("limitations", []),
+                "igv_view_notice": review_notice,
                 "warning_message": " ".join(
-                    item for item in (warning if isinstance(warning, str) else "", cache_warning, review_notice) if item
+                    item for item in (warning if isinstance(warning, str) else "", cache_warning, review_warning) if item
                 ),
                 "notice_message": notice if isinstance(notice, str) else "",
                 "can_delete_comment": lambda comment: can_delete_comment(request, comment),
@@ -2495,7 +2497,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "sample": sample_row,
                 "display_identifier": display_identifier,
                 "webigv_config_json": json.dumps(browser_config),
-                "warning_message": igv_review_view(config, sample_row, outputs)["notice"],
+                "igv_view_notice": igv_review_view(config, sample_row, outputs)["notice"],
+                "warning_message": "",
                 "notice_message": "",
             },
         )
