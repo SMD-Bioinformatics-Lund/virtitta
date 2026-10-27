@@ -1,0 +1,46 @@
+# Copy to virtitta.dev.toml and verify the result-root mappings before importing.
+# Relative writable paths resolve against this config directory, not the shell cwd.
+[app]
+title = "Virtitta DEV"
+host = "127.0.0.1"
+port = 5812
+root_path = "/virtitta"
+
+[database]
+path = "data_dev/virtitta.sqlite3"
+
+[auth]
+enabled = true
+provider = "local"
+cookie_name = "virtitta_dev_session"
+# For loopback/SSH-tunnel HTTP only; use true when served over HTTPS.
+cookie_secure = false
+
+[igv]
+enabled = true
+base_url = "http://localhost:60151/load"
+
+[webigv]
+enabled = true
+igv_js_url = "/static/igv.min.js"
+
+[cluster]
+# Enable only after checking tools and the dev URL reachable by GrapeTree.
+enabled = false
+output_root = "data_dev/clusters"
+public_base_url = ""
+grapetree_url = ""
+iqtree_threads = 4
+
+[exports]
+lims_root = "data_dev/lims_exports"
+# Intentionally no lims_ingest_root: dev must not send results to production.
+
+[cache]
+outputs_root = "data_dev/output_cache"
+output_keys = ["main_fasta", "iupac_fasta", "display_rug_kde_plot"]
+
+[[results_roots]]
+name = "hcv_dev_results"
+linux_path = "/fs1/results_dev/virpipa/hcv"
+windows_path = "Q:/results_dev/virpipa/hcv"

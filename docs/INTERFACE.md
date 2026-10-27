@@ -1,5 +1,9 @@
 # Virtitta Interface Guide
 
+The displayed version describes the loaded source checkout when running from
+conda/micromamba, unless `VIRTITTA_VERSION` explicitly overrides it. Docker keeps
+its injected build version. This is resolved at startup; restart after code updates.
+
 This guide describes the browser interface. Available controls depend on authentication and role settings.
 The upper-left subtitle includes the running Virtitta image version, for example `v0.9.0-1-gccd14b3`.
 

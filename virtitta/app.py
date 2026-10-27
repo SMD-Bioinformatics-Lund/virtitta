@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from virtitta import __version__
+from virtitta import __version__, runtime_version
 from virtitta.artifact_cache import CACHE_OFFLINE_UNVERIFIED, resolve_cached_output
 from virtitta.auth import (
     PERMISSION_CATEGORY_UPDATE,
@@ -115,7 +115,7 @@ def display_version(value: str | None) -> str:
     return version if version.startswith("v") else f"v{version}"
 
 
-templates.env.globals["app_version"] = display_version(os.environ.get("VIRTITTA_VERSION"))
+templates.env.globals["app_version"] = display_version(runtime_version())
 
 DETAIL_FILE_LINKS = [
     ("Main FASTA", "main_fasta"),

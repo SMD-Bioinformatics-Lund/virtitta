@@ -2,6 +2,9 @@
 
 This guide covers setup, command-line operations, authentication, and deployment notes.
 
+For an isolated conda/micromamba dev instance and Hopper-to-dev imports, use the
+[development testing procedure](DEVELOPMENT.md) and `virtitta.dev.example.toml`.
+
 ## Environment
 
 Local development currently assumes the `virtitta` conda environment:
@@ -14,6 +17,13 @@ cd ~/git/virtitta
 
 Use `PYTHONPATH=$PWD python -m virtitta.cli ...` from the repository checkout, or install the package and use the
 `virtitta` console script.
+
+The UI version is resolved once at startup: a nonempty `VIRTITTA_VERSION` overrides
+everything (as in Docker); otherwise a source checkout uses its own
+`git describe --tags --always --dirty`, independent of the launch directory.
+Installed packages without Git metadata, missing Git or failed Git lookup fall back
+to the package version. Restart after changing revisions. A dirty suffix includes
+tracked local edits; keep site configuration in the ignored dev config.
 
 For a fresh checkout, install the Python package into the active environment:
 
