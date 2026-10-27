@@ -21,6 +21,7 @@ The interface is designed for efficient day-to-day review rather than presentati
 
 - [Interface guide](docs/INTERFACE.md): table behavior, sample detail pages, exports, roles, and common workflows
 - [Admin guide](docs/ADMIN.md): setup, CLI commands, authentication, maintenance, and deployment notes
+- [Development testing](docs/DEVELOPMENT.md): isolated conda instance and manual imports without changing production
 - [Plans and TODO](docs/PLANS.md): future work and deferred cleanup items
 
 ## Data Source

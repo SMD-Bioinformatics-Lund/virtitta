@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from virtitta import __version__
+from virtitta import __version__, runtime_version
 from virtitta.igv_review import REVIEW_KEYS, review_locus, select_review
 from virtitta.resistance import (
     HCV_RESISTANCE_DRUGS,
@@ -123,7 +123,7 @@ def display_version(value: str | None) -> str:
     return version if version.startswith("v") else f"v{version}"
 
 
-templates.env.globals["app_version"] = display_version(os.environ.get("VIRTITTA_VERSION"))
+templates.env.globals["app_version"] = display_version(runtime_version())
 
 DETAIL_FILE_LINKS = [
     ("IGV review provenance", "igv_review_manifest"),

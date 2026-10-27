@@ -1,5 +1,9 @@
 # Virtitta Interface Guide
 
+The displayed version describes the loaded source checkout when running from
+conda/micromamba, unless `VIRTITTA_VERSION` explicitly overrides it. Docker keeps
+its injected build version. This is resolved at startup; restart after code updates.
+
 ## IUPAC resistance review in IGV
 
 New VirPipa archives declare an analytical IUPAC review bundle. Desktop IGV and
