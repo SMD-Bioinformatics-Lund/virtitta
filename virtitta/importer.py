@@ -8,6 +8,7 @@ from pathlib import Path
 from virtitta.artifact_cache import cache_sample_outputs
 from virtitta.config import Config, ResultsRoot
 from virtitta.outputs import required_sidecars, safe_relative_path
+from virtitta.typing_evidence import typing_summary
 from virtitta.repository import connect, init_db, sync_run_sample_count, upsert_run, upsert_sample, utc_now
 
 
@@ -276,6 +277,12 @@ def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpa
     qc = sample.get("qc", {})
     coverage = qc.get("coverage_thresholds_pct", {})
     typing = sample.get("typing", {})
+    ranked_typing = typing_summary(typing)
+    subtype = typing.get("main_blast_genotype")
+    identity = typing.get("main_blast_identity")
+    if ranked_typing is not None:
+        subtype = ranked_typing["evidence"]["subtype"]
+        identity = ranked_typing["selected"]["identity"] if ranked_typing["selected"] else None
     host_filter = sample.get("host_filter", {})
     sample_metadata = sample.get("sample_metadata", {})
     af_counts = sample.get("variants", {}).get("af_counts", {})
@@ -291,8 +298,8 @@ def _flatten_sample_record(sample: dict, *, root_name: str, sample_results_relpa
         "lid": sample.get("lid"),
         "source_root_name": root_name,
         "sample_results_relpath": sample_results_relpath.as_posix(),
-        "typing_report_subtype": typing.get("main_blast_genotype"),
-        "typing_main_blast_identity": typing.get("main_blast_identity"),
+        "typing_report_subtype": subtype,
+        "typing_main_blast_identity": identity,
         "host_filter_reads_in": host_filter.get("reads_in"),
         "host_filter_reads_removed_proportion": host_filter.get("reads_removed_proportion"),
         "qc_coverage_pct": qc.get("coverage_pct"),

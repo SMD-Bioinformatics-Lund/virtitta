@@ -288,6 +288,9 @@
               </div>
               {% else %}
               {% set formatted_value = format_table_value(value, column) %}
+              {% if column == 'typing_report_subtype' and value is none and not row.get(column ~ '_overridden') and row.typing_evidence_summary %}
+              {% set formatted_value = row.typing_evidence_summary.status_label %}
+              {% endif %}
               <span class="cell-content {% if row.get(column ~ '_overridden') %}overridden-value{% endif %}" title="{% if row.get(column ~ '_overridden') %}Imported: {{ format_value(row.get('imported_' ~ column), column) }}{% else %}{{ formatted_value }}{% endif %}">{{ formatted_value }}</span>
               {% endif %}
             </td>

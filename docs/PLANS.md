@@ -11,10 +11,10 @@ the same change. Keep entries short enough to revisit and prune.
 
 ## Open Plans
 
-- Defer BLAST subtyping changes until resistance validation. The implementation plan
-  is in the sibling VirPipa repository at `docs/plans/blast_subtyping.md`: summarize
-  per-reference segments, group subtype alternatives and render pipeline-provided
-  evidence in sample details. Do not infer new typing or resistance calls in Virtitta.
+- Implemented ranked typing import/display from VirPipa `typing.evidence`: explicit
+  uncertainty, selected-reference identity/support, grouped alternatives and provenance
+  download. Run the fresh Hopper/import validation before release. The pipeline plan
+  remains in the sibling VirPipa repository at `docs/plans/blast_subtyping.md`.
 
 - Consider showing names or other profile information on the user account page; currently it shows username, role,
   and password change only.
@@ -25,7 +25,7 @@ the same change. Keep entries short enough to revisit and prune.
 - Implemented shared sample/tree/GrapeTree resistance summaries: incomplete assessment
   is not a clear negative, and scored substitutions alone are not resistance.
 - Next: run the representative-data checklist in VirPipa's `docs/resistance_validation.md`
-  before collection-wide reprocessing. BLAST ranking and display remain deferred.
+  before collection-wide reprocessing, including the new shared BLAST typing result.
 - Future typing: add validated subtype-1a clade I/II classification, explicit unassigned
   results and method/reference provenance; show clade below subtype, not as resistance.
 - Implemented IUPAC-targeted desktop/webIGV review bundle selection, scaffold-derived

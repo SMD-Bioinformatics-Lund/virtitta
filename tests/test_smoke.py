@@ -3469,7 +3469,7 @@ class VirtittaSmokeTests(unittest.TestCase):
         self.assertIn("Showing basic viewer help", rendered)
         self.assertIn("VirPipa run review v", rendered)
         self.assertIn("Main-table headers", rendered)
-        self.assertIn("Percentage identity of the main BLAST typing match", rendered)
+        self.assertIn("BLAST identity across the selected reference", rendered)
         self.assertIn('href="http://testserver/help">Help</a>', rendered)
         self.assertNotIn("Functions available to your role", rendered)
         self.assertNotIn("Edit metadata", rendered)

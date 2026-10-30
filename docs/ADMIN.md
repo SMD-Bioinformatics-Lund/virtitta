@@ -107,6 +107,21 @@ To move a whole result tree without changing relative paths, keep the same root 
 `windows_path` in `virtitta.toml`. If you also rename the root, existing SQLite rows must be reimported or updated from
 the old `source_root_name` to the new one.
 
+## Ranked typing imports
+
+QC JSON with `typing.evidence` schema `1.0` supplies the authoritative analytical-IUPAC
+subtype and selected-reference identity. Absent evidence retains legacy behaviour;
+explicit ambiguous/unassigned evidence imports null subtype/identity without fallback.
+Unsupported or malformed declared evidence is rejected rather than treated as legacy.
+No database schema migration is needed: the full evidence stays in imported raw JSON,
+while existing normalized columns support subtype filters, sorting and downstream metadata.
+
+After upgrading Virtitta, re-import a completed new-format dev run to refresh these
+normalized columns. Restarting alone does not refresh previously imported records.
+Re-import preserves comments, QC status, categories, groups and metadata overrides.
+A curator subtype override is retained independently and does not recalculate resistance.
+Keep dev results and database isolated and validate before a production refresh.
+
 ## IGV Configuration
 
 New archives declare `igv_review` metadata and `igv_iupac_*` output paths in the

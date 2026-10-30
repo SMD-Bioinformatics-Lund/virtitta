@@ -52,7 +52,7 @@ Key behavior:
 - `LID` is the main visible sample identifier when available.
 - `Read pairs` in the main table and sample details shows half of the raw read count entering host filtering.
 - Leading columns stay sticky during horizontal scrolling.
-- Table filters apply by run, subtype, QC state, categories, manual groups, and numeric thresholds. The displayed subtype is imported from the VirPipa BLAST top-hit genotype (`typing.main_blast_genotype`).
+- Table filters apply by run, subtype, QC state, categories, manual groups, and numeric thresholds. New archives use the pipeline's ranked analytical 15% IUPAC assignment (`typing.evidence`); older archives retain their scaffold top-hit call (`typing.main_blast_genotype`). The BLAST percentage is the selected reference's alignment-weighted identity for new evidence, or the historical top-hit identity for older archives. Ambiguous/unassigned new results show an explicit label and have no imported subtype or identity; they never fall back to the scaffold call.
 - The text search field filters the currently loaded table client-side.
 - Clicking a column header sorts by that column; clicking it again reverses the order. The active sort is retained when filters are applied.
 - Column visibility can be changed from the `Columns` panel. `Classification` is shown by default when imported from
@@ -172,6 +172,19 @@ The detail page shows:
 - result file links, including the main BLAST output when imported
 - IGV track file links
 - raw imported QC JSON
+
+New archives have a compact Typing evidence section: status and up to five subtype
+groups represented by their strongest reference. Expand a group to compare up to three
+references by accession, identity, aligned bases, whole-query coverage, observed (non-N)
+coverage and summed bit score. The selected reference's aligned bases and whole-query
+coverage also appear in Imported Summary. Technical details explain the ranking and
+score margin, which are descriptive rather than confidence probabilities. Secondary
+hits do not establish mixed infection. Full evidence remains in the raw QC JSON, with
+a view/download link for `typing_json` when published.
+
+Virtitta renders this evidence; it does not rank hits, realign genes or reinterpret
+resistance rules. Metadata overrides remain separate: a curator subtype override changes
+the displayed metadata but does not change the pipeline evidence or resistance outcome.
 
 Result files expose browser `View` actions for text-oriented outputs such as FASTA, BLAST, TSV, BED, GFF, and LIMS text
 files, plus `Download` actions for saving the file. CRAM files and the rug plot are download-only in this section; the

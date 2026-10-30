@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from virtitta import __version__, runtime_version
+from virtitta.typing_evidence import typing_summary
 from virtitta.igv_review import REVIEW_KEYS, review_locus, select_review
 from virtitta.resistance import (
     HCV_RESISTANCE_DRUGS,
@@ -126,6 +127,7 @@ def display_version(value: str | None) -> str:
 templates.env.globals["app_version"] = display_version(runtime_version())
 
 DETAIL_FILE_LINKS = [
+    ("Typing evidence", "typing_json"),
     ("IGV review provenance", "igv_review_manifest"),
     ("Mapping scaffold FASTA", "main_fasta"),
     ("Analytical majority FASTA", "analytical_majority_fasta"),
@@ -147,6 +149,7 @@ DETAIL_FILE_LINKS = [
 ]
 
 VIEWABLE_DETAIL_OUTPUT_KEYS = {
+    "typing_json",
     "igv_review_manifest",
     "analytical_majority_fasta",
     "main_consensus_metadata",
@@ -228,8 +231,8 @@ HELP_COLUMN_DESCRIPTIONS = {
     "sample_metadata_classification": "Classification imported from the sample metadata source.",
     "qc_status": "Virtitta review decision: unreviewed, pass, or fail.",
     "manual_groups": "User-defined groups containing the sample.",
-    "typing_report_subtype": "HCV subtype reported from the main VirPipa BLAST result.",
-    "typing_main_blast_identity": "Percentage identity of the main BLAST typing match.",
+    "typing_report_subtype": "Pipeline subtype from ranked analytical IUPAC typing, or the historical BLAST call for legacy archives.",
+    "typing_main_blast_identity": "BLAST identity across the selected reference's non-overlapping segments; historical top-hit identity for legacy archives.",
     "resistance_summary": "Compact geno2pheno HCV drug-resistance calls; hover for detected mutations.",
     "host_filter_reads_in": "Number of read pairs entering host/human read filtering.",
     "host_filter_reads_removed_proportion": "Percentage of input reads removed by host/human filtering.",
@@ -1424,6 +1427,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
         for row in rows:
             raw = raw_json_for_sample(row)
+            row["typing_evidence_summary"] = typing_summary(raw.get("typing", {}))
             row["resistance_summary"] = build_resistance_cells(raw)
             row["resistance_summary_text"] = resistance_summary_text(raw)
             row["resistance_summary_tooltip"] = resistance_tooltip_text(raw)
@@ -2256,6 +2260,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "config": config,
                 "sample": sample_row,
                 "sample_json": raw,
+                "typing_evidence_summary": typing_summary(raw.get("typing", {})),
                 "sample_json_pretty": json.dumps(raw, indent=2, sort_keys=True),
                 "comments": comments,
                 "format_value": format_value,

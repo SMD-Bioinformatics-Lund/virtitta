@@ -1,0 +1,29 @@
+{% if typing_evidence_summary %}
+{% set evidence = typing_evidence_summary.evidence %}
+<section class="panel" id="typing-evidence">
+  <h3>Typing evidence</h3>
+  <p>{{ typing_evidence_summary.status_label }}{% if evidence.subtype %}: {{ evidence.subtype }}{% endif %} · analytical 15% IUPAC</p>
+  {% if evidence.status in ['ambiguous', 'unassigned'] %}
+  <p>No definitive subtype was selected. Subtype-dependent resistance is not assessed.</p>
+  {% endif %}
+  {% for group in evidence.groups[:5] %}
+  {% set best = group.references[0] %}
+  <details>
+    <summary>{{ group.subtype }} · {{ best.reference }} · {{ '%.2f'|format(best.identity) }}% identity · {{ '%.2f'|format(best.query_coverage_pct) }}% query coverage</summary>
+    <table class="detail-table">
+      <thead><tr><th>Reference</th><th>Identity %</th><th>Aligned bases</th><th>Query coverage %</th><th>Observed coverage %</th><th>Bit score sum</th></tr></thead>
+      <tbody>{% for reference in group.references[:3] %}
+      <tr><td>{{ reference.reference }}</td><td>{{ '%.2f'|format(reference.identity) }}</td><td>{{ reference.aligned_bases }}</td><td>{{ '%.2f'|format(reference.query_coverage_pct) }}</td><td>{{ '%.2f'|format(reference.observed_coverage_pct) if reference.observed_coverage_pct is not none else '—' }}</td><td>{{ format_value(reference.bit_score) }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </details>
+  {% else %}<p class="muted">No recognized subtype alternatives.</p>{% endfor %}
+  <details>
+    <summary>Technical details</summary>
+    <p class="muted">Ranking uses compatible, non-overlapping segments for each reference. Identity uses alignment columns including gaps; query coverage counts aligned query positions once. Observed coverage excludes N bases from numerator and denominator. Bit score sums and the score margin are descriptive, not confidence probabilities. Alternatives do not establish mixed infection.</p>
+    <dl><dt>Method</dt><dd>{{ evidence.method }}</dd><dt>Score margin between the two strongest recognized subtype groups</dt><dd>{{ format_value(evidence.score_margin) }}</dd></dl>
+    {% if evidence.unrecognized_references %}<p>Unrecognized reference labels: {% for reference in evidence.unrecognized_references %}{{ reference.reference }}{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+    <p class="muted">Full alternatives, segments and input/database provenance are retained in the imported QC JSON and typing evidence file when available.</p>
+  </details>
+</section>
+{% endif %}
